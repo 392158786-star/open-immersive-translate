@@ -9,8 +9,13 @@ import type {
   LangCode,
   TranslateParagraph,
   TranslationContext,
+  ServiceConfig,
 } from "../shared/types";
 import { loadConfig } from "../shared/config";
+import {
+  removeDuplicateTranslation,
+  translationLooksGarbled,
+} from "../shared/deduplicate";
 import { translationCache, type TranslationCacheKey } from "./cache";
 import type { TranslationCache } from "./cache";
 import {
@@ -39,6 +44,8 @@ export interface TranslateParagraphsRequest {
   serviceId: string;
   glossary?: GlossaryEntry[];
   context?: TranslationContext;
+  removeDuplicateTranslations?: boolean;
+  translationIntegrityMode?: boolean;
   onPartial?(serviceId: string, text: string): void | Promise<void>;
   onResult(batchResults: ParagraphTranslationResult[]): void | Promise<void>;
   signal?: AbortSignal;
@@ -182,6 +189,7 @@ function isRetryable(error: unknown): boolean {
 
 function unpackResult(
   result: ServiceTranslateResult,
+  sources: readonly string[],
   count: number,
   serviceId: string,
 ): BatchValue[] {
@@ -189,15 +197,120 @@ function unpackResult(
     const error = result.errors?.[index];
     if (error) return { error };
     const text = result.texts[index];
-    return text === undefined
-      ? {
-          error: itemError(
-            `Translation response is missing item ${index + 1}.`,
-            serviceId,
-          ),
-        }
-      : { text };
+    if (text === undefined) {
+      return {
+        error: itemError(
+          `Translation response is missing item ${index + 1}.`,
+          serviceId,
+        ),
+      };
+    }
+    const source = sources[index];
+    if (source && translationLooksInvalid(source, text)) {
+      return {
+        error: itemError(
+          `Translation response is incomplete for item ${index + 1}.`,
+          serviceId,
+        ),
+      };
+    }
+    return { text };
   });
+}
+
+function translationLooksIncomplete(source: string, translation: string): boolean {
+  const sourceText = source.replace(/\{\/?\d+\}/g, "").trim();
+  const sourceLetters = sourceText.match(/[A-Za-z]/g)?.length ?? 0;
+  if (sourceLetters < 24 || !/[.!?。！？]/.test(sourceText)) return false;
+  const translatedText = translation.replace(/\s+/g, "").trim();
+  return translatedText.length < Math.max(12, sourceLetters * 0.25);
+}
+
+function translationLooksUnrelated(
+  source: string,
+  translation: string,
+): boolean {
+  const normalizedSource = source.replace(/\{\/?\d+\}/g, "").trim();
+  const normalizedTarget = translation.trim();
+  if (!normalizedTarget) return true;
+  if (
+    normalizedTarget.includes("第九百零一章") &&
+    !/(?:chapter|第.{0,8}章|901)/iu.test(normalizedSource)
+  ) {
+    return true;
+  }
+  const words = normalizedSource.split(/\s+/).filter(Boolean);
+  const letters = normalizedSource.match(/[A-Za-z]/g)?.length ?? 0;
+  return (
+    words.length <= 4 &&
+    letters <= 32 &&
+    normalizedTarget.length > Math.max(24, letters * 4)
+  );
+}
+
+function translationLooksInvalid(source: string, translation: string): boolean {
+  return (
+    translationLooksIncomplete(source, translation) ||
+    translationLooksUnrelated(source, translation)
+  );
+}
+
+function normalizeTranslatedValue(
+  value: BatchValue,
+  item: SchedulerParagraph,
+  request: Pick<
+    TranslateParagraphsRequest,
+    | "glossary"
+    | "removeDuplicateTranslations"
+    | "translationIntegrityMode"
+    | "serviceId"
+  >,
+): BatchValue {
+  if (
+    request.removeDuplicateTranslations === false ||
+    value.error ||
+    value.text === undefined
+  ) {
+    return value;
+  }
+  if (
+    request.translationIntegrityMode !== false &&
+    translationLooksGarbled(value.text, { allowPlaceholders: true })
+  ) {
+    return {
+      error: itemError(
+        "Translation returned corrupted text.",
+        request.serviceId,
+      ),
+    };
+  }
+  const protectedTerms = [
+    ...(request.glossary?.map((entry) => entry.k) ?? []),
+    ...(item.protectedTerms ?? []),
+  ];
+  const text = removeDuplicateTranslation(
+    item.text,
+    value.text,
+    protectedTerms,
+  );
+  if (
+    request.translationIntegrityMode !== false &&
+    translationLooksGarbled(text, { allowPlaceholders: true })
+  ) {
+    return {
+      error: itemError(
+        "Translation became corrupted after cleanup.",
+        request.serviceId,
+      ),
+    };
+  }
+  if (text) return { text };
+  return {
+    error: itemError(
+      "Translation became empty after duplicate cleanup.",
+      request.serviceId,
+    ),
+  };
 }
 
 function groupItems(
@@ -270,6 +383,8 @@ export class TranslationScheduler {
         serviceId,
         glossary: request.glossary,
         context: request.context,
+        removeDuplicateTranslations: request.removeDuplicateTranslations,
+        translationIntegrityMode: request.translationIntegrityMode,
         onResult: (results) => {
           for (const result of results) delivered.add(result.id);
           emit({
@@ -344,21 +459,17 @@ export class TranslationScheduler {
             service.supportsLangs?.(request.from, request.to) ??
             true),
         );
-      let { primary, fallback } = await this.resolveServices(request.serviceId);
-      const requestedServiceId = primary.id;
-      if (!supports(primary)) {
-        if (!supports(fallback)) {
-          throw new TranslateError(
-            "invalid_config",
-            `No configured service supports ${request.from} to ${request.to}.`,
-            { serviceId: requestedServiceId, retryable: false },
-          );
-        }
-        primary = fallback;
-        fallback = undefined;
-      } else if (!supports(fallback)) {
-        fallback = undefined;
+      const services = (await this.resolveServices(request.serviceId)).filter(
+        supports,
+      );
+      if (!services.length) {
+        throw new TranslateError(
+          "invalid_config",
+          `No configured service supports ${request.from} to ${request.to}.`,
+          { serviceId: request.serviceId, retryable: false },
+        );
       }
+      const [primary, ...fallbacks] = services;
       const cacheKeys = request.items.map((item) =>
         this.cacheKey(
           primary.id,
@@ -367,6 +478,7 @@ export class TranslationScheduler {
           item.text,
           request.glossary,
           request.context,
+          request.removeDuplicateTranslations,
         ),
       );
       const cached = await this.cache.getMany(cacheKeys);
@@ -376,7 +488,15 @@ export class TranslationScheduler {
       const misses: SchedulerParagraph[] = [];
       request.items.forEach((item, index) => {
         const value = cached[index];
-        if (value) hits.push({ id: item.id, text: value.text });
+        const normalized = value
+          ? normalizeTranslatedValue({ text: value.text }, item, request)
+          : undefined;
+        if (
+          normalized?.text !== undefined &&
+          !translationLooksInvalid(item.text, normalized.text)
+        ) {
+          hits.push({ id: item.id, text: normalized.text });
+        }
         else misses.push(item);
       });
       if (hits.length) await request.onResult(hits);
@@ -398,25 +518,35 @@ export class TranslationScheduler {
       await Promise.all(
         batches.map(async (batch) => {
           const priority = batch.some((item) => item.priority);
-          let values = await this.executeWithRetry(
-            primary,
-            batch.map((item) => item.text),
-            request,
-            priority,
-            controller.signal,
-          );
-          if (controller.signal.aborted) throw cancellationError(primary.id);
-
-          const failed = values
-            .map((value, index) => (value.error ? index : -1))
-            .filter((index) => index >= 0);
-          if (fallback && failed.length) {
-            const fallbackValues = await this.executeWithRetry(
-              fallback,
-              failed.map((index) => batch[index].text),
+          let values = (
+            await this.executeWithRetry(
+              primary,
+              batch.map((item) => item.text),
               request,
               priority,
               controller.signal,
+            )
+          ).map((value, index) =>
+            normalizeTranslatedValue(value, batch[index], request),
+          );
+          if (controller.signal.aborted) throw cancellationError(primary.id);
+
+          for (const fallback of fallbacks) {
+            const failed = values
+              .map((value, index) => (value.error ? index : -1))
+              .filter((index) => index >= 0);
+            if (!failed.length) break;
+            const failedItems = failed.map((index) => batch[index]);
+            const fallbackValues = (
+              await this.executeWithRetry(
+                fallback,
+                failedItems.map((item) => item.text),
+                request,
+                priority,
+                controller.signal,
+              )
+            ).map((value, index) =>
+              normalizeTranslatedValue(value, failedItems[index], request),
             );
             values = [...values];
             failed.forEach((batchIndex, fallbackIndex) => {
@@ -437,6 +567,7 @@ export class TranslationScheduler {
                       batch[index].text,
                       request.glossary,
                       request.context,
+                      request.removeDuplicateTranslations,
                     ),
                     value: { text: value.text, ts: Date.now() },
                   },
@@ -474,10 +605,16 @@ export class TranslationScheduler {
     text: string,
     glossary?: GlossaryEntry[],
     context?: TranslationContext,
+    removeDuplicateTranslations?: boolean,
   ): TranslationCacheKey {
+    const removeDuplicates = removeDuplicateTranslations !== false;
     const variant =
-      glossary?.length || context
-        ? JSON.stringify({ glossary: glossary ?? [], context: context ?? null })
+      glossary?.length || context || removeDuplicates
+        ? JSON.stringify({
+            glossary: glossary ?? [],
+            context: context ?? null,
+            removeDuplicateTranslations: removeDuplicates,
+          })
         : undefined;
     return { serviceId, from, to, text, ...(variant ? { variant } : {}) };
   }
@@ -528,7 +665,7 @@ export class TranslationScheduler {
           signal,
         );
         if (signal.aborted) throw cancellationError(service.id);
-        return unpackResult(result, callTexts.length, service.id);
+        return unpackResult(result, callTexts, callTexts.length, service.id);
       } catch (error) {
         if (signal.aborted) throw cancellationError(service.id);
         return callTexts.map(() => ({ error }));
@@ -552,53 +689,65 @@ export class TranslationScheduler {
     return merged;
   }
 
-  private async resolveServices(serviceId: string): Promise<{
-    primary: TranslationService;
-    fallback?: TranslationService;
-  }> {
+  private async resolveServices(
+    serviceId: string,
+  ): Promise<TranslationService[]> {
     const injected = this.injectedServices.get(serviceId);
-    const explicitFallback = this.fallbackServices[serviceId];
     if (injected) {
-      return {
-        primary: injected,
-        fallback: explicitFallback
-          ? (this.injectedServices.get(explicitFallback) ??
-            getService(explicitFallback))
-          : undefined,
-      };
+      const services = [injected];
+      const seen = new Set([serviceId]);
+      let currentId = this.fallbackServices[serviceId];
+      while (currentId && !seen.has(currentId)) {
+        seen.add(currentId);
+        const fallback =
+          this.injectedServices.get(currentId) ?? getService(currentId);
+        if (fallback) services.push(fallback);
+        currentId = this.fallbackServices[currentId];
+      }
+      return services;
     }
 
     const config = await this.configProvider();
-    const serviceConfig = config.services[serviceId];
-    if (serviceConfig && serviceConfig.enabled !== true) {
-      throw new TranslateError(
-        "invalid_config",
-        `Translation service ${serviceId} is disabled.`,
-        { serviceId, retryable: false },
-      );
+    const services: TranslationService[] = [];
+    const seen = new Set<string>();
+    let currentId: string | undefined = serviceId;
+
+    while (currentId && !seen.has(currentId)) {
+      seen.add(currentId);
+      const serviceConfig: ServiceConfig | undefined =
+        config.services[currentId];
+      if (serviceConfig?.enabled === false) {
+        if (!services.length) {
+          throw new TranslateError(
+            "invalid_config",
+            `Translation service ${currentId} is disabled.`,
+            { serviceId: currentId, retryable: false },
+          );
+        }
+        currentId =
+          this.fallbackServices[currentId] ?? serviceConfig.fallbackService;
+        continue;
+      }
+
+      const service =
+        this.injectedServices.get(currentId) ??
+        (serviceConfig
+          ? createService(currentId, serviceConfig)
+          : getService(currentId));
+      if (service) services.push(service);
+
+      currentId =
+        this.fallbackServices[currentId] ?? serviceConfig?.fallbackService;
     }
-    const primary = serviceConfig
-      ? createService(serviceId, serviceConfig)
-      : getService(serviceId);
-    if (!primary) {
+
+    if (!services.length) {
       throw new TranslateError(
         "invalid_config",
         `Translation service ${serviceId} is not configured.`,
         { serviceId, retryable: false },
       );
     }
-
-    const fallbackId = explicitFallback ?? serviceConfig?.fallbackService;
-    if (!fallbackId) return { primary };
-    const fallbackConfig = config.services[fallbackId];
-    return {
-      primary,
-      fallback:
-        this.injectedServices.get(fallbackId) ??
-        (fallbackConfig
-          ? createService(fallbackId, fallbackConfig)
-          : getService(fallbackId)),
-    };
+    return services;
   }
 }
 

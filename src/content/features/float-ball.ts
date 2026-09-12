@@ -86,12 +86,20 @@ export function init(ctx: FeatureContext): () => void {
         white-space: nowrap;
       }
       .menu button:hover { background: #f3f4f6; }
+      .menu button[data-active="true"] {
+        color: #1d4ed8;
+        background: #eff6ff;
+        font-weight: 600;
+      }
       @media print { :host { display: none !important; } }
     </style>
     <button class="ball" type="button" title="Toggle translation" aria-label="Toggle translation"></button>
     <div class="menu" role="menu" hidden>
       <button type="button" role="menuitem" data-action="settings">设置</button>
-      <button type="button" role="menuitem" data-action="translation-only">仅译文</button>
+      <button type="button" role="menuitem" data-action="original">原网页</button>
+      <button type="button" role="menuitem" data-action="translation-only">仅中文</button>
+      <button type="button" role="menuitem" data-action="dual">中英对照</button>
+      <button type="button" role="menuitem" data-action="academic">学术助手</button>
       <button type="button" role="menuitem" data-action="never-site">从不翻译此站</button>
     </div>
   `;
@@ -139,6 +147,19 @@ export function init(ctx: FeatureContext): () => void {
   const closeMenu = (): void => {
     menu.hidden = true;
   };
+  const refreshMenuState = (): void => {
+    const activeMode =
+      ctx.config.translationMode === "translation" ? "translation-only" : "dual";
+    for (const item of menu.querySelectorAll<HTMLButtonElement>("button")) {
+      const action = item.dataset.action;
+      item.dataset.active = String(
+        (!ctx.isTranslated() && action === "original") ||
+          (ctx.isTranslated() && action === activeMode) ||
+          (action === "academic" &&
+            ctx.config.academic?.enabled === true),
+      );
+    }
+  };
 
   const onPointerDown = (event: PointerEvent): void => {
     if (event.button !== 0) return;
@@ -185,20 +206,21 @@ export function init(ctx: FeatureContext): () => void {
       suppressClick = false;
       return;
     }
-    closeMenu();
-    ctx.toggleTranslate();
+    menu.hidden = !menu.hidden;
+    refreshMenuState();
     button.setAttribute("aria-pressed", String(ctx.isTranslated()));
   };
 
   const onContextMenu = (event: MouseEvent): void => {
     event.preventDefault();
     menu.hidden = !menu.hidden;
+    refreshMenuState();
   };
 
   const onMenuClick = (event: Event): void => {
-    const target = event.target;
-    if (!(target instanceof HTMLButtonElement)) return;
-    const action = target.dataset.action;
+    const target = event.target as HTMLElement | null;
+    const action = target?.dataset.action;
+    if (!action) return;
     closeMenu();
 
     if (action === "settings") {
@@ -206,13 +228,38 @@ export function init(ctx: FeatureContext): () => void {
       return;
     }
 
-    if (action === "translation-only") {
+    if (action === "original") {
+      if (ctx.isTranslated()) ctx.toggleTranslate();
+      button.setAttribute("aria-pressed", "false");
+      return;
+    }
+
+    if (action === "translation-only" || action === "dual") {
       void sendToBackground({
         type: "setConfig",
-        patch: { translationMode: "translation" },
+        patch: {
+          translateMainOnly: false,
+          translationMode:
+            action === "translation-only" ? "translation" : "dual",
+        },
       }).catch(() => undefined);
-      if (!ctx.isTranslated()) ctx.toggleTranslate();
+      if (!ctx.isTranslated()) ctx.toggleTranslate("whole");
       button.setAttribute("aria-pressed", "true");
+      return;
+    }
+
+    if (action === "academic") {
+      const academic = ctx.config.academic;
+      if (!academic) return;
+      void sendToBackground({
+        type: "setConfig",
+        patch: {
+          academic: {
+            ...academic,
+            enabled: !academic.enabled,
+          },
+        },
+      }).catch(() => undefined);
       return;
     }
 
@@ -231,7 +278,8 @@ export function init(ctx: FeatureContext): () => void {
   };
 
   const onDocumentPointerDown = (event: PointerEvent): void => {
-    if (!event.composedPath().includes(host)) closeMenu();
+    if (event.target === host || event.composedPath().includes(host)) return;
+    closeMenu();
   };
 
   const onKeyDown = (event: KeyboardEvent): void => {
@@ -246,6 +294,7 @@ export function init(ctx: FeatureContext): () => void {
   window.addEventListener("pointerup", onPointerUp);
   document.addEventListener("pointerdown", onDocumentPointerDown);
   document.addEventListener("keydown", onKeyDown);
+  refreshMenuState();
 
   return () => {
     disposed = true;

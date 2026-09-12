@@ -215,6 +215,13 @@ const arxiv: Rule = {
     ".list-comments",
     ".list-journal-ref",
     ".list-subjects",
+    ".tablecell.comments",
+    ".tablecell.subjects",
+    ".submission-history h2",
+    ".extra-services h2",
+    ".full-text h2",
+    ".bookmarks h2",
+    ".endorsers h2",
   ],
   excludeSelectors: [".MathJax", "math", "pre", "code", "nav"],
   atomicBlockSelectors: [

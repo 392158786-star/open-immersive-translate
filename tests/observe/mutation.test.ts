@@ -79,4 +79,22 @@ describe("observeMutations", () => {
     expect(onChanged).toHaveBeenCalledWith([parent]);
     stop();
   });
+
+  it("observes disclosure state changes", async () => {
+    vi.useFakeTimers();
+    document.body.innerHTML =
+      '<button aria-expanded="false">Menu</button><section>Panel</section>';
+    const button = document.querySelector("button")!;
+    const onChanged = vi.fn();
+    const stop = observeMutations(document.body, onChanged, {
+      debounceMs: 100,
+    });
+
+    button.setAttribute("aria-expanded", "true");
+    await Promise.resolve();
+    await vi.advanceTimersByTimeAsync(100);
+
+    expect(onChanged).toHaveBeenCalledWith([button]);
+    stop();
+  });
 });

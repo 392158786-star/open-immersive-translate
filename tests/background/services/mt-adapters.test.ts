@@ -6,6 +6,7 @@ import { BaiduService } from "../../../src/background/services/baidu";
 import { BingService } from "../../../src/background/services/bing";
 import { CaiyunService } from "../../../src/background/services/caiyun";
 import { DeepLService } from "../../../src/background/services/deepl";
+import { MyMemoryService } from "../../../src/background/services/mymemory";
 import { NiuTransService } from "../../../src/background/services/niutrans";
 import { OpenLService } from "../../../src/background/services/openl";
 import { PapagoService } from "../../../src/background/services/papago";
@@ -13,6 +14,7 @@ import { TencentService } from "../../../src/background/services/tencent";
 import { TransmartService } from "../../../src/background/services/transmart";
 import { VolcService } from "../../../src/background/services/volc";
 import { YandexFreeService } from "../../../src/background/services/yandex-free";
+import { YoudaoFreeService } from "../../../src/background/services/youdao-free";
 import { YoudaoService } from "../../../src/background/services/youdao";
 
 const request = {
@@ -32,6 +34,153 @@ afterEach(() => {
 });
 
 describe("official machine translation adapters", () => {
+  it("uses MyMemory with automatic language detection and mapped Chinese", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      json({
+        responseData: { translatedText: "浣犲ソ" },
+        responseStatus: 200,
+        quotaFinished: false,
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await new MyMemoryService().translate(
+      { ...request, from: "auto", texts: ["hello world"] },
+      signal(),
+    );
+
+    const [url] = fetchMock.mock.calls[0] as [string, RequestInit];
+    const parsed = new URL(url);
+    expect(parsed.searchParams.get("q")).toBe("hello world");
+    expect(parsed.searchParams.get("langpair")).toBe("Autodetect|zh-CN");
+    expect(result.texts).toEqual(["浣犲ソ"]);
+  });
+
+  it("passes MyMemory's optional contact email and reports quota exhaustion", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      json({
+        responseData: { translatedText: "QUERY LENGTH LIMIT EXCEEDED" },
+        responseStatus: 403,
+        responseDetails: "MYMEMORY WARNING: YOU USED ALL AVAILABLE FREE TRANSLATIONS FOR TODAY",
+        quotaFinished: true,
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      new MyMemoryService({ email: "user@example.com" }).translate(
+        request,
+        signal(),
+      ),
+    ).rejects.toMatchObject({ code: "RATE_LIMIT" });
+    const [url] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(new URL(url).searchParams.get("de")).toBe("user@example.com");
+  });
+
+  it("splits MyMemory requests that exceed its 500-character limit", async () => {
+    const fetchMock = vi.fn().mockImplementation(() =>
+      Promise.resolve(
+        json({
+          responseData: { translatedText: "片段。" },
+          responseStatus: 200,
+        }),
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const longText = Array.from(
+      { length: 60 },
+      (_, index) => `Sentence ${index} contains enough academic context.`,
+    ).join(" ");
+
+    const result = await new MyMemoryService().translate(
+      { ...request, texts: [longText] },
+      signal(),
+    );
+
+    expect(fetchMock.mock.calls.length).toBeGreaterThan(2);
+    for (const [url] of fetchMock.mock.calls as Array<[string, RequestInit]>) {
+      expect(new URL(url).searchParams.get("q")?.length).toBeLessThanOrEqual(
+        500,
+      );
+    }
+    expect(result.texts[0]).toBe(
+      Array.from({ length: fetchMock.mock.calls.length }, () => "片段。").join(
+        "",
+      ),
+    );
+  });
+
+  it("uses the fast Youdao public demo endpoint", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      json({
+        errorCode: "0",
+        translation: ["大型语言模型编码临床知识"],
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await new YoudaoFreeService().translate({
+      texts: ["Large language models encode clinical knowledge"],
+      from: "en",
+      to: "zh-CN",
+    }, signal());
+
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe("https://aidemo.youdao.com/trans");
+    const body = init.body as URLSearchParams;
+    expect(body.get("q")).toBe(
+      "Large language models encode clinical knowledge",
+    );
+    expect(body.get("from")).toBe("en");
+    expect(body.get("to")).toBe("zh-CHS");
+    expect(result.texts).toEqual(["大型语言模型编码临床知识"]);
+  });
+
+  it("batches Youdao free requests and splits translations by paragraph", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      json({
+        errorCode: "0",
+        translation: [
+          "First paragraph.\n[[[IMT_SEGMENT]]]\nSecond paragraph.",
+        ],
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await new YoudaoFreeService().translate({
+      texts: ["First source.", "Second source."],
+      from: "en",
+      to: "zh-CN",
+    }, signal());
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect((init.body as URLSearchParams).get("q")).toBe(
+      "First source.\n[[[IMT_SEGMENT]]]\nSecond source.",
+    );
+    expect(result.texts).toEqual(["First paragraph.", "Second paragraph."]);
+  });
+
+  it("rejects Youdao output that drops protected inline placeholders", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      json({
+        errorCode: "0",
+        translation: ["JavaScript包含数组、映射和数学对象。"],
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      new YoudaoFreeService().translate({
+        texts: [
+          "JavaScript contains {1}Array{/1}, {2}Map{/2}, and {3}Math{/3}.",
+        ],
+        from: "en",
+        to: "zh-CN",
+      }, signal()),
+    ).rejects.toMatchObject({ code: "BAD_RESPONSE" });
+  });
+
   it("calls DeepL Free with auth, tag handling, formality, and mapped language codes", async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       json({
@@ -320,7 +469,11 @@ describe("other machine translation adapters", () => {
     expect(service.limited).toBe(true);
     const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
     expect(JSON.parse(init.body as string)).toMatchObject({
-      header: { fn: "auto_translation" },
+      header: {
+        fn: "auto_translation",
+        client_key: "browser-edge-extension",
+        session: "",
+      },
       source: { lang: "en", text_list: ["hello"] },
       target: { lang: "zh" },
     });

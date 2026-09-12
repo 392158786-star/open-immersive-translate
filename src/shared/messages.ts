@@ -3,6 +3,7 @@ import browser from "webextension-polyfill";
 import type { PageCommandId } from "./j-types";
 import type { AssistantRequest } from "./k-assistant";
 import type {
+  AcademicTermKnowledge,
   Config,
   ConfigPatch,
   GlossaryEntry,
@@ -16,6 +17,48 @@ import type {
   TranslateParagraph,
   TranslationContext,
 } from "./types";
+
+/** Resolve one academic term using page context, AI, and public scholarly APIs. */
+export interface AcademicResolveMessage {
+  type: "academicResolve";
+  term: string;
+  context: string;
+  title?: string;
+  url?: string;
+  service?: string;
+}
+
+/** Read a previously resolved term from the local knowledge cache. */
+export interface AcademicGetMessage {
+  type: "academicGet";
+  term: string;
+}
+
+/** Open the full knowledge page for one term. */
+export interface AcademicOpenMessage {
+  type: "openAcademic";
+  term: string;
+}
+
+export interface LocalModelStatusItem {
+  role: "translation" | "academic";
+  model: string;
+  ready: boolean;
+  status: string;
+  progress: number;
+  loaded: number;
+  total: number;
+  file?: string;
+}
+
+export interface GetLocalModelStatusMessage {
+  type: "getLocalModelStatus";
+}
+
+export interface LoadLocalModelMessage {
+  type: "loadLocalModel";
+  target: "translation" | "academic" | "all";
+}
 
 /** Request the merged rule for a document URL. */
 export interface GetRuleMessage {
@@ -35,6 +78,10 @@ export interface TranslateMessage {
   glossary?: GlossaryEntry[];
   context?: TranslationContext;
   priority?: "normal" | "viewport" | "interactive";
+  /** Remove echoed source text and repeated target fragments from every result. */
+  removeDuplicateTranslations?: boolean;
+  /** Reject corrupt output, keep retrying, and enforce readable segmentation. */
+  translationIntegrityMode?: boolean;
 }
 
 /** One streamed paragraph result. */
@@ -310,6 +357,11 @@ export type Msg =
   | ToggleVideoSubtitlePreTranslationMessage
   | PageTranslationStateMessage
   | ControllerCommandMessage
+  | AcademicResolveMessage
+  | AcademicGetMessage
+  | AcademicOpenMessage
+  | GetLocalModelStatusMessage
+  | LoadLocalModelMessage
   | TranslatePortMessage
   | CancelPortMessage;
 
@@ -334,7 +386,12 @@ export type BackgroundRequest =
   | AssistantRequestMessage
   | GetAssistantCapabilitiesMessage
   | OpenSidePanelMessage
-  | PageTranslationStateMessage;
+  | PageTranslationStateMessage
+  | AcademicResolveMessage
+  | AcademicGetMessage
+  | AcademicOpenMessage
+  | GetLocalModelStatusMessage
+  | LoadLocalModelMessage;
 
 /** Acknowledgement for work submitted to a scheduler. */
 export interface TranslateAcknowledgement {
@@ -378,6 +435,16 @@ export type BackgroundResponse<T extends BackgroundRequest> =
                         ? RuleValidationResult
                         : T extends OpenOptionsMessage
                           ? OpenOptionsResult
+                          : T extends
+                                | AcademicResolveMessage
+                                | AcademicGetMessage
+                            ? AcademicTermKnowledge
+                            : T extends AcademicOpenMessage
+                              ? { opened: boolean }
+                              : T extends GetLocalModelStatusMessage
+                                ? LocalModelStatusItem[]
+                                : T extends LoadLocalModelMessage
+                                  ? { started: boolean }
                           : T extends AssistantRequestMessage
                             ? AssistantResponse
                             : T extends GetAssistantCapabilitiesMessage

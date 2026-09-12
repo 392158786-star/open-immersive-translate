@@ -1,12 +1,31 @@
 <!doctype html>
-<html lang="en">
+<html lang="zh-CN">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Options</title>
+    <title>双语翻译设置</title>
+    <style>
+      body {
+        margin: 0;
+        padding: 32px;
+        color: #1f2937;
+        background: #f8fafc;
+        font: 14px/1.6 system-ui, sans-serif;
+      }
+      .boot-status {
+        max-width: 620px;
+        margin: 10vh auto 0;
+        padding: 20px;
+        border: 1px solid #d7dee8;
+        border-radius: 8px;
+        background: #fff;
+      }
+    </style>
   </head>
   <body>
-    <div id="app"></div>
+    <div id="app">
+      <div class="boot-status">正在加载设置，请稍候...</div>
+    </div>
     <script type="module" src="/src/ui/options/index.tsx"></script>
   </body>
 </html>

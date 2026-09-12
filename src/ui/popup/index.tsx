@@ -315,17 +315,6 @@ async function openExtensionPage(path: string): Promise<void> {
 
 async function openSidePanel(tabId: number | undefined): Promise<void> {
   if (tabId === undefined) return;
-  const sidePanel = (
-    globalThis as unknown as {
-      chrome?: {
-        sidePanel?: { open(options: { tabId: number }): Promise<void> };
-      };
-    }
-  ).chrome?.sidePanel;
-  if (sidePanel) {
-    await sidePanel.open({ tabId });
-    return;
-  }
   await browser.runtime.sendMessage({ type: "openSidePanel", tabId });
 }
 

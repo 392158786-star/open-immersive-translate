@@ -536,6 +536,9 @@ function requestTranslations(
     service: settings.service,
     glossary: settings.config.glossaries,
     context: { title: globalThis.document.title },
+    removeDuplicateTranslations:
+      settings.config.removeDuplicateTranslations,
+    translationIntegrityMode: settings.config.translationIntegrityMode,
   });
 }
 

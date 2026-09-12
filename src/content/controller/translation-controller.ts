@@ -6,12 +6,14 @@ import type {
 } from "../../shared/j-types";
 import {
   connectTranslatePort,
+  sendToBackground,
   type ContentTranslatePort,
   type ParagraphTranslationResult,
   type TranslatePortMessage,
   type TranslateResultMessage,
 } from "../../shared/messages";
 import { normalizeLang } from "../../shared/lang";
+import { lookupLocalUiPhrase } from "../../shared/local-ui-phrases";
 import type {
   Config,
   Paragraph,
@@ -32,22 +34,36 @@ import { translateImmediately } from "../observe/immediate";
 import { observeViewport, type ViewportObserver } from "../observe/viewport";
 import { decodePlaceholders } from "../extract/placeholder";
 import {
+  protectAcademicTerms,
+  restoreAcademicTerms,
+} from "../academic/terms";
+import {
+  captureRenderedScrollAnchor,
   injectStyles,
   markTranslated,
   removeAll as removeRenderedTranslations,
+  removeTranslation,
   renderTranslation,
-  setError,
-  setLoading,
+  restoreRenderedScrollAnchor,
+  setScrollAnchorSuppression,
+  setTranslationScrollActive,
   setMask as setRenderedMask,
   setMode as setRenderedMode,
 } from "../render/inject";
-import { controllerT } from "./i18n";
 import {
   installEditableTranslations,
   TranslationOverrideStore,
 } from "./editable";
 import { installDirectHoverTranslation } from "./hover-directly";
 import { buildPageContext } from "./page-context";
+import {
+  removeDuplicateTranslation,
+  translationLooksGarbled,
+} from "../../shared/deduplicate";
+import {
+  splitTranslationSentences,
+  splitTranslationText,
+} from "./translation-segments";
 import {
   glossaryForDomain,
   resolveTranslationMode,
@@ -59,16 +75,30 @@ import type { PageControllerActions } from "./commands";
 
 const PLACEHOLDER_STYLE = { open: "{", close: "}" } as const;
 const RECONNECT_DELAY_MS = 250;
-
+const REQUEST_TIMEOUT_MS = 20_000;
+const MAX_REQUEST_TIMEOUT_MS = 60_000;
+export const TRANSLATION_SESSION_ACTIVE_KEY = "imt-translation-session-active";
+export const TRANSLATION_SESSION_MODE_KEY = "imt-translation-session-mode";
 interface PendingRequest {
   message: TranslatePortMessage;
   remaining: Set<string>;
   resolve(): void;
+  timeout: ReturnType<typeof setTimeout>;
 }
 
 interface TextWaiter {
   resolve(text: string): void;
   reject(error: Error): void;
+}
+
+interface ParagraphSegmentState {
+  total: number;
+  results: Map<number, ParagraphTranslationResult>;
+}
+
+interface SegmentTarget {
+  paragraphId: string;
+  index: number;
 }
 
 export interface TranslationControllerOptions {
@@ -96,14 +126,28 @@ export class TranslationController implements PageControllerActions {
   private reconnectTimer?: ReturnType<typeof setTimeout>;
   private viewport?: ViewportObserver;
   private stopMutation?: () => void;
+  private stopScroll?: () => void;
+  private scrollTimer?: ReturnType<typeof setTimeout>;
+  private renderFlushTimer?: ReturnType<typeof setTimeout>;
   private stopEditing?: () => void;
   private stopDirectHover?: () => void;
+  private scrollActive = false;
   private readonly paragraphs = new Map<string, AdvancedParagraph>();
   private readonly pendingIds = new Set<string>();
   private readonly renderedIds = new Set<string>();
   private readonly errorIds = new Set<string>();
   private readonly requests = new Map<string, PendingRequest>();
   private readonly textWaiters = new Map<string, TextWaiter>();
+  private readonly paragraphSegments = new Map<
+    string,
+    ParagraphSegmentState
+  >();
+  private readonly segmentTargets = new Map<string, SegmentTarget>();
+  private readonly cachedTranslations = new Map<string, string>();
+  private readonly plainFallbackAttempted = new WeakSet<Element>();
+  private readonly retryAttempts = new Map<string, number>();
+  private readonly retryTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  private readonly deferredResults: ParagraphTranslationResult[] = [];
   private overrideStore = new TranslationOverrideStore(
     window.location.hostname,
   );
@@ -116,6 +160,16 @@ export class TranslationController implements PageControllerActions {
   ) {
     this.config = config as AdvancedPageConfig;
     this.rule = rule as AdvancedPageRule;
+    try {
+      const sessionMode =
+        window.sessionStorage.getItem(TRANSLATION_SESSION_MODE_KEY) ??
+        window.localStorage.getItem(TRANSLATION_SESSION_MODE_KEY);
+      if (sessionMode === "dual" || sessionMode === "translation") {
+        this.config = { ...this.config, translationMode: sessionMode };
+      }
+    } catch {
+      // Fall back to the persisted configuration.
+    }
     this.scope = this.config.translateMainOnly === false ? "whole" : "main";
     this.immediate = this.config.translateToPageEndImmediately === true;
     this.mask = this.config.translationMask === true;
@@ -126,6 +180,7 @@ export class TranslationController implements PageControllerActions {
     setRenderedMask(document, this.mask);
     this.connect();
     this.installMutationObserver();
+    this.installScrollTranslation();
     this.installEditing();
     this.installDirectHover();
     this.emitState();
@@ -136,6 +191,16 @@ export class TranslationController implements PageControllerActions {
   }
 
   shouldAutoTranslate(): boolean {
+    try {
+      if (
+        window.sessionStorage.getItem(TRANSLATION_SESSION_ACTIVE_KEY) === "1" ||
+        window.localStorage.getItem(TRANSLATION_SESSION_ACTIVE_KEY) === "1"
+      ) {
+        return true;
+      }
+    } catch {
+      // Session storage may be unavailable on restricted pages.
+    }
     return shouldAutoTranslatePage(
       this.config,
       this.rule,
@@ -145,8 +210,13 @@ export class TranslationController implements PageControllerActions {
   }
 
   toggleTranslate(scope: "main" | "whole" = this.scope): void {
-    if (this.active) this.removeAll();
-    else this.start(scope);
+    if (this.active) {
+      this.setSessionAutoTranslate(false);
+      this.removeAll();
+    } else {
+      this.setSessionAutoTranslate(true);
+      this.start(scope);
+    }
   }
 
   togglePage(): void {
@@ -165,6 +235,7 @@ export class TranslationController implements PageControllerActions {
     if (this.active || this.destroyed) return;
     this.active = true;
     this.scope = scope;
+    setScrollAnchorSuppression(true);
     this.injectPageStyles();
     if (!this.immediate) {
       this.viewport = observeViewport([], (ids) => {
@@ -177,6 +248,20 @@ export class TranslationController implements PageControllerActions {
   setMode(mode: TranslationMode): void {
     this.runtimeMode = mode;
     this.config = { ...this.config, translationMode: mode };
+    try {
+      window.sessionStorage.setItem(TRANSLATION_SESSION_MODE_KEY, mode);
+    } catch {
+      // Mode still applies for the current document without session storage.
+    }
+    try {
+      window.localStorage.setItem(TRANSLATION_SESSION_MODE_KEY, mode);
+    } catch {
+      // Mode still applies for the current document without local storage.
+    }
+    void sendToBackground({
+      type: "setConfig",
+      patch: { translationMode: mode },
+    }).catch(() => undefined);
     setRenderedMode(document, mode);
   }
 
@@ -187,6 +272,7 @@ export class TranslationController implements PageControllerActions {
 
   togglePageEndImmediately(): void {
     if (this.active && this.immediate) {
+      this.setSessionAutoTranslate(false);
       this.removeAll();
       return;
     }
@@ -240,6 +326,7 @@ export class TranslationController implements PageControllerActions {
     this.injectPageStyles();
     setRenderedMask(document, this.mask);
     this.installMutationObserver();
+    this.installScrollTranslation();
     this.installEditing();
     this.installDirectHover();
     if (wasActive) this.start(scope);
@@ -301,6 +388,7 @@ export class TranslationController implements PageControllerActions {
     this.viewport?.disconnect();
     this.viewport = undefined;
     for (const [requestId, request] of this.requests) {
+      clearTimeout(request.timeout);
       this.post({ type: "cancel", requestId });
       request.resolve();
       for (const id of request.remaining) {
@@ -309,11 +397,20 @@ export class TranslationController implements PageControllerActions {
       }
     }
     this.requests.clear();
+    this.paragraphSegments.clear();
+    this.segmentTargets.clear();
+    this.deferredResults.length = 0;
+    if (this.renderFlushTimer !== undefined) {
+      clearTimeout(this.renderFlushTimer);
+      this.renderFlushTimer = undefined;
+    }
+    this.scrollActive = false;
     this.pendingIds.clear();
     this.renderedIds.clear();
     this.errorIds.clear();
     this.paragraphs.clear();
     removeRenderedTranslations(document);
+    setScrollAnchorSuppression(false);
     this.injectPageStyles();
     setRenderedMask(document, this.mask);
     this.emitState();
@@ -322,7 +419,11 @@ export class TranslationController implements PageControllerActions {
   destroy(): void {
     this.destroyed = true;
     this.removeAll();
+    this.cachedTranslations.clear();
     this.stopMutation?.();
+    this.stopScroll?.();
+    if (this.scrollTimer !== undefined) clearTimeout(this.scrollTimer);
+    setTranslationScrollActive(false);
     this.stopEditing?.();
     this.stopDirectHover?.();
     if (this.reconnectTimer !== undefined) clearTimeout(this.reconnectTimer);
@@ -334,14 +435,28 @@ export class TranslationController implements PageControllerActions {
     return pageTranslationState({
       active: this.active,
       total: this.paragraphs.size,
-      pending: this.pendingIds.size,
+      pending: this.pendingIds.size + this.deferredResults.length,
       translated: this.renderedIds.size,
       errors: this.errorIds.size,
     });
   }
 
   private extractionRule(): AdvancedPageRule {
-    return this.scope === "whole" ? { ...this.rule, selectors: [] } : this.rule;
+    if (this.scope !== "whole") return this.rule;
+    return {
+      ...this.rule,
+      selectors: [],
+      // Transparent components are traversed by the scanner. Keep site
+      // exclusions, but do not reject interactive navigation wholesale.
+      excludeSelectors: (this.rule.excludeSelectors ?? []).filter(
+        (selector) =>
+          selector !== "nav" && selector !== "[role='navigation']",
+      ),
+      blockMinTextCount: Math.min(
+        this.rule.blockMinTextCount ?? 24,
+        2,
+      ),
+    };
   }
 
   private currentMode(): TranslationMode {
@@ -382,8 +497,103 @@ export class TranslationController implements PageControllerActions {
       () => {
         if (this.active) void this.rescan();
       },
-      { excludeSelectors: this.rule.mutationExcludeSelectors },
+      {
+        debounceMs: 180,
+        excludeSelectors: this.rule.mutationExcludeSelectors,
+      },
     );
+  }
+
+  private setSessionAutoTranslate(active: boolean): void {
+    try {
+      window.sessionStorage.setItem(
+        TRANSLATION_SESSION_ACTIVE_KEY,
+        active ? "1" : "0",
+      );
+    } catch {
+      // Session storage may be unavailable on restricted pages.
+    }
+    try {
+      window.localStorage.setItem(
+        TRANSLATION_SESSION_ACTIVE_KEY,
+        active ? "1" : "0",
+      );
+    } catch {
+      // Local storage may be unavailable on restricted pages.
+    }
+    for (const timer of this.retryTimers.values()) clearTimeout(timer);
+    this.retryTimers.clear();
+    this.retryAttempts.clear();
+  }
+
+  private installScrollTranslation(): void {
+    this.stopScroll?.();
+    const onScroll = (): void => {
+      if (!this.active) return;
+      this.scrollActive = true;
+      setTranslationScrollActive(true);
+      this.translateVisibleParagraphs();
+      if (this.scrollTimer !== undefined) clearTimeout(this.scrollTimer);
+      this.scrollTimer = setTimeout(() => {
+        this.scrollTimer = undefined;
+        this.scrollActive = false;
+        if (this.active) this.flushDeferredResults();
+        setTranslationScrollActive(false);
+        if (!this.active) return;
+        // Visibility can change without a DOM mutation (for example, a
+        // scrolled panel switching from display:none to visible). Rescanning
+        // here also covers lazy content that did not exist during the first
+        // pass, instead of relying on the text-block count staying constant.
+        void this.rescan().then(() => this.translateVisibleParagraphs());
+      }, 180);
+    };
+    document.addEventListener("scroll", onScroll, true);
+    this.stopScroll = () => {
+      document.removeEventListener("scroll", onScroll, true);
+    };
+  }
+
+  private translateVisibleParagraphs(): void {
+    if (!this.active) return;
+    const viewportHeight = window.innerHeight;
+    if (viewportHeight <= 0) return;
+    const margin = Math.max(240, viewportHeight * 1.25);
+    const ids: string[] = [];
+    for (const [id, paragraph] of this.paragraphs) {
+      if (this.pendingIds.has(id) || this.renderedIds.has(id)) continue;
+      const rect = paragraph.container.getBoundingClientRect();
+      if (rect.width <= 0 || rect.height <= 0) continue;
+      if (rect.bottom < -margin || rect.top > viewportHeight + margin) continue;
+      ids.push(id);
+    }
+    if (ids.length) void this.translateParagraphIds(ids, "viewport");
+  }
+
+  private scheduleDeferredRenderFlush(): void {
+    if (this.renderFlushTimer !== undefined) {
+      clearTimeout(this.renderFlushTimer);
+      this.renderFlushTimer = undefined;
+    }
+    if (!this.scrollActive && this.pendingIds.size === 0) {
+      this.flushDeferredResults();
+      return;
+    }
+    this.renderFlushTimer = setTimeout(() => {
+      this.renderFlushTimer = undefined;
+      this.flushDeferredResults(true);
+    }, 30_000);
+  }
+
+  private flushDeferredResults(force = false): void {
+    if (!this.deferredResults.length) return;
+    if (this.scrollActive || (!force && this.pendingIds.size > 0)) return;
+    const results = this.deferredResults.splice(0);
+    const anchor = captureRenderedScrollAnchor();
+    try {
+      for (const result of results) this.renderResultNow(result);
+    } finally {
+      restoreRenderedScrollAnchor(anchor);
+    }
   }
 
   private installEditing(): void {
@@ -416,17 +626,56 @@ export class TranslationController implements PageControllerActions {
       this.scanRoot(),
       this.extractionRule(),
     ) as AdvancedParagraph[];
+    const nonNested = found.filter(
+      (paragraph) =>
+        !found.some(
+          (candidate) =>
+            candidate !== paragraph &&
+            paragraph.container.contains(candidate.container),
+        ),
+    );
     const title = extractTitle(document, this.extractionRule());
-    if (title) found.unshift(title as AdvancedParagraph);
+    if (title) nonNested.unshift(title as AdvancedParagraph);
     const queued: string[] = [];
-    for (const paragraph of found) {
+    for (const paragraph of nonNested) {
+      const existing = this.paragraphs.get(paragraph.id);
+      if (existing) {
+        if (
+          existing.container === paragraph.container &&
+          this.hasTranslationMarker(existing.container)
+        ) {
+          continue;
+        }
+        if (
+          existing.container !== paragraph.container &&
+          existing.container.isConnected &&
+          this.hasTranslationMarker(existing.container)
+        ) {
+          continue;
+        }
+        this.forgetParagraph(paragraph.id);
+      }
       if (!this.registerParagraph(paragraph)) continue;
+      this.useCompleteVisibleText(paragraph);
+      const cached = this.cachedTranslations.get(paragraph.text);
+      if (cached !== undefined) {
+        this.renderText(paragraph, cached, false);
+        continue;
+      }
       const override = await this.overrideStore.get(paragraph.id);
       if (!this.active) return;
       if (override !== undefined) this.renderText(paragraph, override, false);
-      else queued.push(paragraph.id);
+      else {
+        const localUiTranslation = this.localUiTranslation(paragraph);
+        if (localUiTranslation !== undefined) {
+          this.renderText(paragraph, localUiTranslation, false);
+        } else {
+          queued.push(paragraph.id);
+        }
+      }
     }
     if (this.immediate) {
+      this.collectMissedProse(queued);
       await this.translateIdsImmediately(queued);
     } else {
       for (const id of queued) {
@@ -435,6 +684,174 @@ export class TranslationController implements PageControllerActions {
       }
     }
     this.emitState();
+  }
+
+  private collectMissedProse(queued: string[]): void {
+    if (!this.immediate || !document.body) return;
+    const knownContainers = new Set(
+      [...this.paragraphs.values()].map(({ container }) => container),
+    );
+    const candidates = Array.from(
+      document.body.querySelectorAll<HTMLElement>(
+        "p, li, h1, h2, h3, h4, h5, h6, blockquote, td, th",
+      ),
+    ).filter((element) => {
+      if (element.closest("pre, code, [data-imt]")) return false;
+      if (
+        [...knownContainers].some(
+          (container) =>
+            container === element ||
+            container.contains(element) ||
+            element.contains(container),
+        )
+      ) {
+        return false;
+      }
+      const hasDirectTranslation = Array.from(element.children).some(
+        (child) => {
+          const marker = child.getAttribute("data-imt");
+          return (
+            marker === "target" || marker === "loading" || marker === "error"
+          );
+        },
+      );
+      if (hasDirectTranslation) {
+        return false;
+      }
+      const text = (element.innerText ?? element.textContent ?? "")
+        .replace(/\s+/g, " ")
+        .trim();
+      const latin = text.match(/[A-Za-z]/g)?.length ?? 0;
+      const chinese = text.match(/[\u4e00-\u9fff]/g)?.length ?? 0;
+      return latin >= 20 && chinese < 5;
+    });
+    for (const container of candidates) {
+      if (knownContainers.has(container)) continue;
+      knownContainers.add(container);
+      const text = (container.innerText ?? container.textContent ?? "")
+        .replace(/\s+/g, " ")
+        .trim();
+      const paragraph: AdvancedParagraph = {
+        id: `imt-fallback-${++this.sequence}`,
+        container,
+        nodes: [...container.childNodes],
+        text,
+        placeholders: new Map(),
+      };
+      this.paragraphs.set(paragraph.id, paragraph);
+      queued.push(paragraph.id);
+    }
+  }
+
+  private useCompleteVisibleText(paragraph: AdvancedParagraph): void {
+    if (!this.immediate || paragraph.preformatted) return;
+    const container = paragraph.container as HTMLElement;
+    const visible = (container.innerText ?? container.textContent ?? "")
+      .replace(/\s+/g, " ")
+      .trim();
+    const current = paragraph.text.replace(/\s+/g, " ").trim();
+    if (
+      visible.length <= Math.max(40, current.length * 1.2) ||
+      !/[A-Za-z]{3}/.test(visible)
+    ) {
+      return;
+    }
+    paragraph.text = visible;
+    paragraph.nodes = [...paragraph.container.childNodes];
+    paragraph.placeholders = new Map();
+    paragraph.protectedAcademicText = undefined;
+    paragraph.academicTerms = undefined;
+  }
+
+  private async translateMissedProse(): Promise<void> {
+    if (!this.immediate || !this.active || !document.body) return;
+    const knownContainers = new Set(
+      [...this.paragraphs.values()].map(({ container }) => container),
+    );
+    const candidates = Array.from(
+      document.body.querySelectorAll<HTMLElement>(
+        "p, li, h1, h2, h3, h4, h5, h6, blockquote, td, th",
+      ),
+    ).filter((element) => {
+      if (element.hasAttribute("data-imt-id")) return false;
+      if (element.closest("pre, code, [data-imt]")) return false;
+      if (
+        [...knownContainers].some(
+          (container) =>
+            container === element ||
+            container.contains(element) ||
+            element.contains(container),
+        )
+      ) {
+        return false;
+      }
+      const text = (element.innerText ?? element.textContent ?? "")
+        .replace(/\s+/g, " ")
+        .trim();
+      const latin = text.match(/[A-Za-z]/g)?.length ?? 0;
+      const chinese = text.match(/[\u4e00-\u9fff]/g)?.length ?? 0;
+      return latin >= 20 && chinese < 5;
+    });
+    if (!candidates.length) return;
+
+    const paragraphs: AdvancedParagraph[] = candidates.flatMap((container) => {
+      if (knownContainers.has(container)) return [];
+      knownContainers.add(container);
+      const text = (container.innerText ?? container.textContent ?? "")
+        .replace(/\s+/g, " ")
+        .trim();
+      return [
+        {
+          id: `imt-fallback-${++this.sequence}`,
+          container,
+          nodes: [...container.childNodes],
+          text,
+          placeholders: new Map(),
+        },
+      ];
+    });
+    for (const paragraph of paragraphs) {
+      this.paragraphs.set(paragraph.id, paragraph);
+    }
+    await this.translateParagraphIds(
+      paragraphs.map(({ id }) => id),
+      "normal",
+    );
+  }
+
+  private localUiTranslation(
+    paragraph: AdvancedParagraph,
+  ): string | undefined {
+    const source = paragraph.text.replace(/\{\/?\d+\}/g, "").trim();
+    return lookupLocalUiPhrase(source);
+  }
+
+  private hasTranslationMarker(container: Element): boolean {
+    if (container.hasAttribute("data-imt-id")) return true;
+    return Array.from(container.children).some((child) => {
+      const marker = child.getAttribute("data-imt");
+      return marker === "target" || marker === "loading" || marker === "error";
+    });
+  }
+
+  private forgetParagraph(id: string): void {
+    this.paragraphs.delete(id);
+    this.pendingIds.delete(id);
+    this.renderedIds.delete(id);
+    this.errorIds.delete(id);
+  }
+
+  private rememberTranslation(source: string, translation: string): void {
+    if (!source || !translation) return;
+    this.cachedTranslations.delete(source);
+    this.cachedTranslations.set(source, translation);
+    while (this.cachedTranslations.size > 1_000) {
+      const oldest = this.cachedTranslations.keys().next().value as
+        | string
+        | undefined;
+      if (oldest === undefined) break;
+      this.cachedTranslations.delete(oldest);
+    }
   }
 
   private registerParagraph(paragraph: AdvancedParagraph): boolean {
@@ -463,11 +880,28 @@ export class TranslationController implements PageControllerActions {
   }
 
   private translateIdsImmediately(ids: readonly string[]): Promise<void> {
-    return translateImmediately(
-      ids,
-      (id) => this.translateParagraphIds([id], "normal"),
-      { concurrency: this.config.immediateTranslationConcurrency ?? 4 },
-    );
+    const viewportHeight = Math.max(1, window.innerHeight);
+    const margin = viewportHeight * 2;
+    const priority: string[] = [];
+    const deferred: string[] = [];
+    for (const id of ids) {
+      const paragraph = this.paragraphs.get(id);
+      if (!paragraph) continue;
+      const rect = paragraph.container.getBoundingClientRect();
+      if (rect.bottom >= -margin && rect.top <= viewportHeight + margin) {
+        priority.push(id);
+      } else {
+        deferred.push(id);
+      }
+    }
+    return Promise.all([
+      priority.length
+        ? this.translateParagraphIds(priority, "viewport")
+        : Promise.resolve(),
+      deferred.length
+        ? this.translateParagraphIds(deferred, "normal")
+        : Promise.resolve(),
+    ]).then(() => undefined);
   }
 
   private async translateParagraphIds(
@@ -476,7 +910,10 @@ export class TranslationController implements PageControllerActions {
   ): Promise<void> {
     const paragraphs = ids.flatMap((id) => {
       const paragraph = this.paragraphs.get(id);
-      return paragraph && !this.pendingIds.has(id) && !this.renderedIds.has(id)
+      return paragraph &&
+        !this.pendingIds.has(id) &&
+        !this.renderedIds.has(id) &&
+        this.isParagraphAllowed(paragraph)
         ? [paragraph]
         : [];
     });
@@ -495,33 +932,146 @@ export class TranslationController implements PageControllerActions {
     ]);
   }
 
+  private isParagraphAllowed(paragraph: AdvancedParagraph): boolean {
+    const selectors = this.rule.selectors;
+    if (!selectors?.length) return true;
+    return selectors.some((selector) => {
+      try {
+        return (
+          paragraph.container.matches(selector) ||
+          Boolean(paragraph.container.closest(selector))
+        );
+      } catch {
+        return false;
+      }
+    });
+  }
+
+  private clearParagraphSegments(paragraphId: string): void {
+    for (const [id, target] of this.segmentTargets) {
+      if (target.paragraphId === paragraphId) {
+        this.segmentTargets.delete(id);
+      }
+    }
+    this.paragraphSegments.delete(paragraphId);
+  }
+
+  private collectSegmentResult(
+    target: SegmentTarget,
+    result: ParagraphTranslationResult,
+  ): void {
+    const state = this.paragraphSegments.get(target.paragraphId);
+    if (!state) return;
+    state.results.set(target.index, result);
+    if (state.results.size < state.total) return;
+
+    const ordered = Array.from(
+      { length: state.total },
+      (_, index) => state.results.get(index),
+    );
+    const error = ordered.find((item) => item?.error)?.error;
+    const paragraph = this.paragraphs.get(target.paragraphId);
+    if (paragraph && !error) {
+      paragraph.translatedSegments = ordered.map((item) =>
+        restoreAcademicTerms(
+          item?.text ?? "",
+          paragraph.academicTerms ?? [],
+        ),
+      );
+    }
+    this.clearParagraphSegments(target.paragraphId);
+    this.renderResult({
+      id: target.paragraphId,
+      ...(error
+        ? { error }
+        : { text: ordered.map((item) => item?.text ?? "").join(" ") }),
+    });
+  }
+
   private requestParagraphs(
     paragraphs: readonly AdvancedParagraph[],
     priority: TranslationPriority,
   ): Promise<void> {
+    const requestParagraphs: TranslatePortMessage["paragraphs"] = [];
     for (const paragraph of paragraphs) {
       this.pendingIds.add(paragraph.id);
       this.errorIds.delete(paragraph.id);
-      setLoading(paragraph);
+      paragraph.translatedSegments = undefined;
+      this.clearParagraphSegments(paragraph.id);
+      if (!paragraph.protectedAcademicText) {
+        if (
+          this.config.academic.enabled &&
+          !this.plainFallbackAttempted.has(paragraph.container)
+        ) {
+          const protectedText = protectAcademicTerms(
+            paragraph.text,
+            Math.max(this.config.academic.maxTermsPerParagraph, 12),
+          );
+          paragraph.academicTerms = protectedText.terms;
+          paragraph.protectedAcademicText = protectedText.text;
+        } else {
+          paragraph.academicTerms = [];
+          paragraph.protectedAcademicText = paragraph.text;
+        }
+      }
+
+      const source = paragraph.protectedAcademicText;
+      const segments =
+        this.config.translationMode === "dual"
+          ? splitTranslationSentences(source)
+          : splitTranslationText(source);
+      if (segments.length <= 1) {
+        requestParagraphs.push({
+          id: paragraph.id,
+          text: source,
+          priority,
+          protectedTerms: paragraph.academicTerms,
+        });
+        continue;
+      }
+
+      this.paragraphSegments.set(paragraph.id, {
+        total: segments.length,
+        results: new Map(),
+      });
+      segments.forEach((text, index) => {
+        const id = `${paragraph.id}::segment-${index}`;
+        this.segmentTargets.set(id, {
+          paragraphId: paragraph.id,
+          index,
+        });
+        requestParagraphs.push({
+          id,
+          text,
+          priority,
+          protectedTerms: paragraph.academicTerms,
+        });
+      });
     }
     const requestId = this.newRequestId();
     const message: TranslatePortMessage = {
       type: "translate",
       requestId,
-      paragraphs: paragraphs.map(({ id, text }) => ({ id, text, priority })),
+      paragraphs: requestParagraphs,
       from: this.config.sourceLanguage,
       to: this.config.targetLanguage,
       service: this.runtimeService ?? this.rule.service ?? this.config.service,
       glossary: this.glossary(),
       context: this.context(),
       priority,
+      removeDuplicateTranslations: this.config.removeDuplicateTranslations,
+      translationIntegrityMode: this.config.translationIntegrityMode,
     };
     this.emitState();
     return new Promise((resolve) => {
       this.requests.set(requestId, {
         message,
-        remaining: new Set(paragraphs.map(({ id }) => id)),
+        remaining: new Set(requestParagraphs.map(({ id }) => id)),
         resolve,
+        timeout: this.createRequestTimeout(
+          requestId,
+          requestParagraphs.length,
+        ),
       });
       this.post(message);
     });
@@ -534,7 +1084,6 @@ export class TranslationController implements PageControllerActions {
     const generation = this.generation;
     this.pendingIds.add(paragraph.id);
     this.errorIds.delete(paragraph.id);
-    setLoading(paragraph);
     this.emitState();
     try {
       const lines = splitPreLikeText(paragraph.text);
@@ -562,12 +1111,7 @@ export class TranslationController implements PageControllerActions {
       );
     } catch {
       if (generation !== this.generation) return;
-      this.pendingIds.delete(paragraph.id);
-      this.errorIds.add(paragraph.id);
-      setError(paragraph, controllerT("translationFailed"), () => {
-        void this.translateParagraphIds([paragraph.id], "interactive");
-      });
-      this.emitState();
+      this.scheduleAutomaticRetry(paragraph);
     }
   }
 
@@ -589,6 +1133,8 @@ export class TranslationController implements PageControllerActions {
       glossary: this.glossary(),
       context: this.context(),
       priority,
+      removeDuplicateTranslations: this.config.removeDuplicateTranslations,
+      translationIntegrityMode: this.config.translationIntegrityMode,
     };
     return new Promise<string>((resolve, reject) => {
       this.textWaiters.set(id, { resolve, reject });
@@ -596,6 +1142,7 @@ export class TranslationController implements PageControllerActions {
         message,
         remaining: new Set([id]),
         resolve: () => undefined,
+        timeout: this.createRequestTimeout(requestId),
       });
       this.post(message);
     });
@@ -670,57 +1217,242 @@ export class TranslationController implements PageControllerActions {
   private handleResult(message: TranslateResultMessage): void {
     const request = this.requests.get(message.requestId);
     if (!request) return;
-    for (const result of message.results) {
-      request.remaining.delete(result.id);
-      const waiter = this.textWaiters.get(result.id);
-      if (waiter) {
-        this.textWaiters.delete(result.id);
-        if (result.error) waiter.reject(new Error(result.error.message));
-        else waiter.resolve(result.text ?? "");
-      } else {
-        this.renderResult(result);
-      }
-    }
-    if (!request.remaining.size) {
-      this.requests.delete(message.requestId);
-      request.resolve();
-      return;
-    }
-    if (!message.done) return;
-    for (const id of request.remaining) {
-      this.pendingIds.delete(id);
-      const waiter = this.textWaiters.get(id);
-      if (waiter) {
-        waiter.reject(new Error("Translation ended without a result."));
-        this.textWaiters.delete(id);
-      } else {
-        const paragraph = this.paragraphs.get(id);
-        if (paragraph) {
-          this.errorIds.add(id);
-          setError(paragraph, controllerT("translationFailed"), () => {
-            void this.translateParagraphIds([id], "interactive");
-          });
+    const anchor = captureRenderedScrollAnchor();
+    try {
+      for (const result of message.results) {
+        request.remaining.delete(result.id);
+        const segment = this.segmentTargets.get(result.id);
+        if (segment) {
+          this.collectSegmentResult(segment, result);
+          continue;
+        }
+        const waiter = this.textWaiters.get(result.id);
+        if (waiter) {
+          this.textWaiters.delete(result.id);
+          if (result.error) waiter.reject(new Error(result.error.message));
+          else waiter.resolve(result.text ?? "");
+        } else {
+          this.renderResult(result);
         }
       }
+      if (!request.remaining.size) {
+        clearTimeout(request.timeout);
+        this.requests.delete(message.requestId);
+        request.resolve();
+        return;
+      }
+      if (!message.done) return;
+      const retryParagraphIds = new Set<string>();
+      for (const id of request.remaining) {
+        const waiter = this.textWaiters.get(id);
+        if (waiter) {
+          waiter.reject(new Error("Translation ended without a result."));
+          this.textWaiters.delete(id);
+        } else {
+          const target = this.segmentTargets.get(id);
+          const paragraphId = target?.paragraphId ?? id;
+          retryParagraphIds.add(paragraphId);
+        }
+      }
+      for (const paragraphId of retryParagraphIds) {
+        this.clearParagraphSegments(paragraphId);
+        const paragraph = this.paragraphs.get(paragraphId);
+        if (paragraph) this.scheduleAutomaticRetry(paragraph);
+      }
+      clearTimeout(request.timeout);
+      this.requests.delete(message.requestId);
+      request.resolve();
+      this.emitState();
+    } finally {
+      restoreRenderedScrollAnchor(anchor);
     }
-    this.requests.delete(message.requestId);
-    request.resolve();
-    this.emitState();
+  }
+
+  private createRequestTimeout(
+    requestId: string,
+    itemCount = 1,
+  ): ReturnType<typeof setTimeout> {
+    return setTimeout(() => {
+      const request = this.requests.get(requestId);
+      if (!request) return;
+      this.requests.delete(requestId);
+      this.post({ type: "cancel", requestId });
+      const retryParagraphIds = new Set<string>();
+      for (const id of request.remaining) {
+        const waiter = this.textWaiters.get(id);
+        if (waiter) {
+          this.textWaiters.delete(id);
+          waiter.reject(new Error("Translation request timed out."));
+          continue;
+        }
+        const target = this.segmentTargets.get(id);
+        retryParagraphIds.add(target?.paragraphId ?? id);
+      }
+      for (const paragraphId of retryParagraphIds) {
+        this.clearParagraphSegments(paragraphId);
+        const paragraph = this.paragraphs.get(paragraphId);
+        if (paragraph) this.scheduleAutomaticRetry(paragraph);
+      }
+      request.resolve();
+      this.emitState();
+    }, Math.min(
+      MAX_REQUEST_TIMEOUT_MS,
+      REQUEST_TIMEOUT_MS + Math.max(0, itemCount - 1) * 300,
+    ));
   }
 
   private renderResult(result: ParagraphTranslationResult): void {
     this.pendingIds.delete(result.id);
+    this.deferredResults.push(result);
+    this.emitState();
+    this.scheduleDeferredRenderFlush();
+  }
+
+  private renderResultNow(result: ParagraphTranslationResult): void {
+    this.pendingIds.delete(result.id);
     const paragraph = this.paragraphs.get(result.id);
     if (!paragraph) return;
     if (result.error) {
-      this.errorIds.add(result.id);
-      setError(paragraph, controllerT("translationFailed"), () => {
-        void this.translateParagraphIds([result.id], "interactive");
-      });
+      if (this.shouldSkipFailedTranslation(paragraph)) {
+        removeTranslation(paragraph);
+        this.pendingIds.delete(paragraph.id);
+        this.errorIds.delete(paragraph.id);
+        markTranslated(paragraph.container, paragraph.id);
+        this.renderedIds.add(paragraph.id);
+        this.emitState();
+        return;
+      }
+      this.scheduleAutomaticRetry(paragraph);
+      return;
+    }
+    this.retryAttempts.delete(paragraph.id);
+    const restored = restoreAcademicTerms(
+      result.text ?? "",
+      paragraph.academicTerms ?? [],
+    );
+    const translated = this.config.removeDuplicateTranslations
+      ? removeDuplicateTranslation(
+          paragraph.text,
+          restored,
+          paragraph.academicTerms ?? [],
+        )
+      : restored;
+    if (!translated.trim()) {
+      this.scheduleAutomaticRetry(paragraph);
+      return;
+    }
+    if (translationLooksGarbled(translated)) {
+      removeTranslation(paragraph);
+      if (this.shouldSkipFailedTranslation(paragraph)) {
+        this.pendingIds.delete(paragraph.id);
+        this.errorIds.delete(paragraph.id);
+        markTranslated(paragraph.container, paragraph.id);
+        this.renderedIds.add(paragraph.id);
+        this.emitState();
+        return;
+      }
+      this.scheduleAutomaticRetry(paragraph);
+      return;
+    }
+    if (this.translationIsUnchanged(paragraph, translated)) {
+      removeTranslation(paragraph);
+      if (!this.plainFallbackAttempted.has(paragraph.container)) {
+        this.plainFallbackAttempted.add(paragraph.container);
+        const visible = (
+          paragraph.container as HTMLElement
+        ).innerText
+          ?.replace(/\s+/g, " ")
+          .trim();
+        paragraph.text = visible || paragraph.text;
+        paragraph.nodes = [...paragraph.container.childNodes];
+        paragraph.placeholders = new Map();
+        paragraph.protectedAcademicText = undefined;
+        paragraph.academicTerms = undefined;
+        this.pendingIds.delete(paragraph.id);
+        this.errorIds.delete(paragraph.id);
+        void this.requestParagraphs([paragraph], "interactive");
+        return;
+      }
+      this.pendingIds.delete(paragraph.id);
+      if (this.shouldSkipFailedTranslation(paragraph)) {
+        removeTranslation(paragraph);
+        this.errorIds.delete(paragraph.id);
+        markTranslated(paragraph.container, paragraph.id);
+        this.renderedIds.add(paragraph.id);
+        this.emitState();
+        return;
+      }
+      this.scheduleAutomaticRetry(paragraph);
+      return;
+    }
+    this.renderText(
+      paragraph,
+      translated,
+      true,
+    );
+  }
+
+  private scheduleAutomaticRetry(paragraph: AdvancedParagraph): void {
+    if (this.retryTimers.has(paragraph.id)) return;
+    const previous = this.retryAttempts.get(paragraph.id) ?? 0;
+    const attempt = previous + 1;
+    if (!this.config.translationIntegrityMode && attempt > 3) {
+      removeTranslation(paragraph);
+      this.pendingIds.delete(paragraph.id);
+      this.errorIds.delete(paragraph.id);
+      markTranslated(paragraph.container, paragraph.id);
+      this.renderedIds.add(paragraph.id);
       this.emitState();
       return;
     }
-    this.renderText(paragraph, result.text ?? "", true);
+
+    this.retryAttempts.set(paragraph.id, attempt);
+    const delay = Math.min(5_000, 800 * 2 ** Math.min(attempt - 1, 3));
+    removeTranslation(paragraph);
+    this.errorIds.delete(paragraph.id);
+    const timer = setTimeout(() => {
+      this.retryTimers.delete(paragraph.id);
+      if (!this.active || !this.paragraphs.has(paragraph.id)) return;
+      this.errorIds.delete(paragraph.id);
+      this.pendingIds.delete(paragraph.id);
+      void this.translateParagraphIds([paragraph.id], "interactive");
+    }, delay);
+    this.retryTimers.set(paragraph.id, timer);
+  }
+
+  private shouldSkipFailedTranslation(
+    paragraph: AdvancedParagraph,
+  ): boolean {
+    const text = paragraph.text.replace(/\{\/?\d+\}/g, "").trim();
+    if (/doi:\s*10\.|10\.\d{4,9}\//i.test(text)) return true;
+    const letters = text.match(/[A-Za-z]/g)?.length ?? 0;
+    const words = text.split(/\s+/).filter(Boolean);
+    return letters < 12 || words.length <= 1;
+  }
+
+  private translationIsUnchanged(
+    paragraph: AdvancedParagraph,
+    translated: string,
+  ): boolean {
+    const normalize = (value: string): string =>
+      value
+        .replace(/\{\/?\d+\}/g, "")
+        .replace(/\s+/g, " ")
+        .trim()
+        .toLocaleLowerCase();
+    const source = normalize(paragraph.text);
+    const target = normalize(translated);
+    if (!target && source) return true;
+    if (source === target) return true;
+    const sourceLetters = source.match(/[a-z]/g)?.length ?? 0;
+    const targetLetters = target.match(/[a-z]/g)?.length ?? 0;
+    const targetChinese = target.match(/[\u4e00-\u9fff]/g)?.length ?? 0;
+    return (
+      sourceLetters >= 20 &&
+      targetLetters >= 20 &&
+      targetChinese < 3 &&
+      targetLetters / sourceLetters >= 0.65
+    );
   }
 
   private renderText(
@@ -733,41 +1465,48 @@ export class TranslationController implements PageControllerActions {
         ? decodePlaceholders(text, paragraph.placeholders, PLACEHOLDER_STYLE)
         : document.createDocumentFragment();
       if (!decode) fragment.append(text);
-      renderTranslation(paragraph as Paragraph, fragment, {
+      const target = renderTranslation(paragraph as Paragraph, fragment, {
         mode: this.currentMode(),
         theme: this.currentTheme(),
         wrapperTag: "font",
+        automaticColor: this.config.autoTranslationColor !== false,
         prefix:
           this.rule.wrapperPrefix === "block" ||
           this.rule.wrapperPrefix === "inline"
             ? this.rule.wrapperPrefix
             : "smart",
         preformatted: paragraph.preformatted,
+        academicTerms: paragraph.academicTerms,
+        translatedSegments: paragraph.translatedSegments,
         style: {
           font: this.config.font,
           fontSize:
             typeof this.config.translationFontSize === "number"
               ? `${this.config.translationFontSize}px`
               : this.config.translationFontSize,
-          color: this.config.translationColor,
+          color:
+            this.config.autoTranslationColor === false
+              ? this.config.translationColor
+              : undefined,
           lineHeight: this.config.translationLineHeight,
         },
       });
+      this.rememberTranslation(paragraph.text, target.textContent ?? text);
       markTranslated(paragraph.container, paragraph.id);
       this.pendingIds.delete(paragraph.id);
       this.errorIds.delete(paragraph.id);
       this.renderedIds.add(paragraph.id);
     } catch {
-      this.pendingIds.delete(paragraph.id);
-      this.errorIds.add(paragraph.id);
-      setError(paragraph, controllerT("invalidTranslation"), () => {
-        void this.translateParagraphIds([paragraph.id], "interactive");
-      });
+      this.scheduleAutomaticRetry(paragraph);
     }
     this.emitState();
   }
 
   private emitState(): void {
-    this.reportState?.(this.state());
+    const state = this.state();
+    document.documentElement.dataset.imtTranslationBusy = String(
+      state.pending > 0,
+    );
+    this.reportState?.(state);
   }
 }

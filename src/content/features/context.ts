@@ -6,6 +6,6 @@ export interface FeatureContext {
   rule: Rule;
   translateText(text: string, from: string, to: string): Promise<string>;
   translateParagraph(container: Element): Promise<void>;
-  toggleTranslate(): void;
+  toggleTranslate(scope?: "main" | "whole"): void;
   isTranslated(): boolean;
 }

@@ -21,6 +21,8 @@ interface PdfTranslationRequest {
   service?: string;
   glossary?: GlossaryEntry[];
   context?: TranslationContext;
+  removeDuplicateTranslations?: boolean;
+  translationIntegrityMode?: boolean;
 }
 
 interface PendingRequest {
@@ -58,6 +60,8 @@ export class PdfTranslationClient {
       glossary: request.glossary,
       context: request.context,
       priority: "viewport",
+      removeDuplicateTranslations: request.removeDuplicateTranslations,
+      translationIntegrityMode: request.translationIntegrityMode,
     };
     this.requests.set(requestId, {
       message,

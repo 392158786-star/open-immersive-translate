@@ -6,11 +6,15 @@ import {
   DEFAULT_INPUT_LANGUAGE_ALIASES,
 } from "./k-types";
 import { LANGUAGE_CODES } from "./lang";
+import {
+  DEFAULT_LOCAL_ACADEMIC_MODEL,
+  DEFAULT_LOCAL_TRANSLATION_MODEL,
+} from "./local-models";
 import { DEFAULT_SUBTITLE_CONFIG, type SubtitleConfig } from "./subtitle-types";
 import type { Config, ConfigPatch, Rule, ServiceConfig } from "./types";
 
 /** Current persisted configuration format. */
-export const CONFIG_VERSION = 3;
+export const CONFIG_VERSION = 12;
 
 /** Storage key containing the complete configuration object. */
 export const CONFIG_STORAGE_KEY = "config";
@@ -57,6 +61,8 @@ const serviceConfigBaseSchema: z.ZodType<ServiceConfig> = z.object({
     "claude",
     "gemini",
     "google",
+    "mymemory",
+    "local-model",
     "bing",
     "azure-translator",
     "deepl",
@@ -66,6 +72,7 @@ const serviceConfigBaseSchema: z.ZodType<ServiceConfig> = z.object({
     "tencent",
     "baidu",
     "youdao",
+    "youdao-free",
     "caiyun",
     "aliyun",
     "papago",
@@ -110,6 +117,8 @@ const serviceConfigBaseSchema: z.ZodType<ServiceConfig> = z.object({
   stream: z.boolean().optional(),
   reasoningEffort: reasoningEffortSchema.optional(),
   reasoningEffortAssistant: reasoningEffortSchema.optional(),
+  localDevice: z.enum(["auto", "webgpu", "wasm"]).optional(),
+  localDtype: z.enum(["q4", "q4f16", "fp16", "q8", "int8"]).optional(),
 });
 
 export const serviceConfigSchema: z.ZodType<ServiceConfig> = z.preprocess(
@@ -182,7 +191,27 @@ export const DEFAULT_SERVICES: Record<string, ServiceConfig> = {
   },
   claude: { kind: "claude", enabled: false },
   gemini: { kind: "gemini", enabled: false },
-  google: { kind: "google", enabled: true },
+  google: { kind: "google", enabled: false },
+  mymemory: {
+    kind: "mymemory",
+    enabled: false,
+    fallbackService: "local-model",
+  },
+  "youdao-free": {
+    kind: "youdao-free",
+    enabled: true,
+    timeoutMs: 12_000,
+    fallbackService: "transmart",
+  },
+  "local-model": {
+    kind: "local-model",
+    enabled: true,
+    model: DEFAULT_LOCAL_TRANSLATION_MODEL,
+    models: [DEFAULT_LOCAL_ACADEMIC_MODEL],
+    localDevice: "auto",
+    localDtype: "q4",
+    fallbackService: undefined,
+  },
   bing: { kind: "bing", enabled: false },
   "azure-translator": { kind: "azure-translator", enabled: false },
   deepl: { kind: "deepl", enabled: false },
@@ -196,7 +225,11 @@ export const DEFAULT_SERVICES: Record<string, ServiceConfig> = {
   aliyun: { kind: "aliyun", enabled: false },
   papago: { kind: "papago", enabled: false },
   "yandex-free": { kind: "yandex-free", enabled: false },
-  transmart: { kind: "transmart", enabled: false },
+  transmart: {
+    kind: "transmart",
+    enabled: true,
+    fallbackService: "local-model",
+  },
   niutrans: { kind: "niutrans", enabled: false },
   openl: { kind: "openl", enabled: false },
   "azure-openai": { kind: "azure-openai", enabled: false },
@@ -235,10 +268,10 @@ export const configSchema: z.ZodType<Config> = z.object({
   version: z.number().int().nonnegative().default(CONFIG_VERSION),
   targetLanguage: langCodeSchema.default("zh-CN"),
   sourceLanguage: langCodeSchema.default("auto"),
-  translationMode: z.enum(["dual", "translation"]).default("dual"),
+  translationMode: z.enum(["dual", "translation"]).default("translation"),
   theme: z.string().default("underline"),
   font: z.string().optional(),
-  service: z.string().default("google"),
+  service: z.string().default("youdao-free"),
   services: z.record(z.string(), serviceConfigSchema).default(DEFAULT_SERVICES),
   shortcuts: z.record(z.string(), z.string()).default(DEFAULT_SHORTCUTS),
   alwaysTranslateSites: z.array(z.string()).default([]),
@@ -367,6 +400,26 @@ export const configSchema: z.ZodType<Config> = z.object({
       enabled: true,
       prompts: DEFAULT_AI_WRITING_PROMPTS,
     }),
+  academic: z
+    .object({
+      enabled: z.boolean().default(true),
+      service: z.string().optional(),
+      showInlineTranslation: z.boolean().default(true),
+      maxTermsPerParagraph: z.number().int().positive().max(20).default(12),
+      cacheDays: z.number().int().positive().default(30),
+      searchSources: z
+        .array(
+          z.enum(["openalex", "crossref", "semantic-scholar"]),
+        )
+        .default(["openalex", "crossref", "semantic-scholar"]),
+    })
+    .default({
+      enabled: true,
+      showInlineTranslation: true,
+      maxTermsPerParagraph: 12,
+      cacheDays: 30,
+      searchSources: ["openalex", "crossref", "semantic-scholar"],
+    }),
   translationModeUrlPattern: translationModePatternSchema.default({
     dualMatches: [],
     translationMatches: [],
@@ -378,8 +431,10 @@ export const configSchema: z.ZodType<Config> = z.object({
   translationThemePatterns: z
     .record(z.string(), z.array(z.string()))
     .default({}),
-  translateMainOnly: z.boolean().default(true),
-  translateToPageEndImmediately: z.boolean().default(false),
+  translateMainOnly: z.boolean().default(false),
+  translateToPageEndImmediately: z.boolean().default(true),
+  removeDuplicateTranslations: z.boolean().default(true),
+  translationIntegrityMode: z.boolean().default(true),
   immediateTranslationConcurrency: z.number().int().positive().default(4),
   translationMask: z.boolean().default(false),
   enableEditTranslation: z.boolean().default(false),
@@ -388,7 +443,8 @@ export const configSchema: z.ZodType<Config> = z.object({
   mainFrameMinTextCount: z.number().int().nonnegative().default(50),
   contextWordLimit: z.number().int().positive().default(80),
   translationFontSize: z.union([z.string(), z.number()]).optional(),
-  translationColor: z.string().optional(),
+  autoTranslationColor: z.boolean().default(true),
+  translationColor: z.string().default("#000000"),
   translationLineHeight: z.union([z.string(), z.number()]).optional(),
   globalCustomCss: z.string().default(""),
   remoteRules: z.array(remoteRuleSubscriptionSchema).default([]),
@@ -569,6 +625,167 @@ registerConfigMigration(2, (config) => {
   };
 });
 
+registerConfigMigration(3, (config) => {
+  const services = isRecord(config.services) ? config.services : {};
+  const existingYoudaoFree = isRecord(services["youdao-free"])
+    ? services["youdao-free"]
+    : {};
+  const existingMyMemory = isRecord(services.mymemory)
+    ? services.mymemory
+    : {};
+  return {
+    ...config,
+    version: 4,
+    service:
+      config.service === undefined || config.service === "local-model"
+        ? "youdao-free"
+        : config.service,
+    services: {
+      ...services,
+      "youdao-free": {
+        ...DEFAULT_SERVICES["youdao-free"],
+        ...existingYoudaoFree,
+      },
+      mymemory: {
+        ...DEFAULT_SERVICES.mymemory,
+        ...existingMyMemory,
+        fallbackService: "local-model",
+      },
+      "local-model": {
+        ...DEFAULT_SERVICES["local-model"],
+        ...(isRecord(services["local-model"]) ? services["local-model"] : {}),
+        fallbackService: undefined,
+      },
+    },
+  };
+});
+
+registerConfigMigration(4, (config) => {
+  const services = isRecord(config.services) ? config.services : {};
+  const existingTransmart = isRecord(services.transmart)
+    ? services.transmart
+    : {};
+  return {
+    ...config,
+    version: 5,
+    services: {
+      ...services,
+      "youdao-free": {
+        ...DEFAULT_SERVICES["youdao-free"],
+        ...(isRecord(services["youdao-free"]) ? services["youdao-free"] : {}),
+        fallbackService: "transmart",
+      },
+      transmart: {
+        ...DEFAULT_SERVICES.transmart,
+        ...existingTransmart,
+        enabled: true,
+        fallbackService: "mymemory",
+      },
+      mymemory: {
+        ...DEFAULT_SERVICES.mymemory,
+        ...(isRecord(services.mymemory) ? services.mymemory : {}),
+        fallbackService: "local-model",
+      },
+    },
+  };
+});
+
+registerConfigMigration(5, (config) => ({
+  ...config,
+  version: 6,
+  translationMode: "translation",
+}));
+
+registerConfigMigration(6, (config) => ({
+  ...config,
+  version: 7,
+  service:
+    config.service === undefined || config.service === "youdao-free"
+      ? "transmart"
+      : config.service,
+  services: {
+    ...(isRecord(config.services) ? config.services : {}),
+    transmart: {
+      ...DEFAULT_SERVICES.transmart,
+      ...(isRecord(config.services) && isRecord(config.services.transmart)
+        ? config.services.transmart
+        : {}),
+      enabled: true,
+      fallbackService: "youdao-free",
+    },
+    "youdao-free": {
+      ...DEFAULT_SERVICES["youdao-free"],
+      ...(isRecord(config.services) && isRecord(config.services["youdao-free"])
+        ? config.services["youdao-free"]
+        : {}),
+      fallbackService: "mymemory",
+    },
+  },
+}));
+
+registerConfigMigration(7, (config) => ({
+  ...config,
+  version: 8,
+  translateToPageEndImmediately: true,
+  removeDuplicateTranslations: true,
+}));
+
+registerConfigMigration(8, (config) => ({
+  ...config,
+  version: 9,
+  translationColor:
+    typeof config.translationColor === "string"
+      ? config.translationColor
+      : "#000000",
+}));
+
+registerConfigMigration(9, (config) => {
+  const services = isRecord(config.services) ? config.services : {};
+  return {
+    ...config,
+    version: 10,
+    service:
+      config.service === undefined || config.service === "transmart"
+        ? "youdao-free"
+        : config.service,
+    services: {
+      ...services,
+      "youdao-free": {
+        ...DEFAULT_SERVICES["youdao-free"],
+        ...(isRecord(services["youdao-free"])
+          ? services["youdao-free"]
+          : {}),
+        enabled: true,
+        fallbackService: "transmart",
+      },
+      transmart: {
+        ...DEFAULT_SERVICES.transmart,
+        ...(isRecord(services.transmart) ? services.transmart : {}),
+        enabled: true,
+        fallbackService: "local-model",
+      },
+      mymemory: {
+        ...DEFAULT_SERVICES.mymemory,
+        ...(isRecord(services.mymemory) ? services.mymemory : {}),
+        enabled: false,
+        fallbackService: "local-model",
+      },
+    },
+  };
+});
+
+registerConfigMigration(10, (config) => ({
+  ...config,
+  version: 11,
+  translationIntegrityMode: true,
+}));
+
+registerConfigMigration(11, (config) => ({
+  ...config,
+  version: 12,
+  autoTranslationColor: true,
+}));
+
 /** Upgrade unknown stored data and validate it as the current configuration. */
 export function migrateConfig(value: unknown): Config {
   let current: Record<string, unknown> = isRecord(value) ? { ...value } : {};
@@ -596,7 +813,16 @@ export function migrateConfig(value: unknown): Config {
 /** Read, migrate, default, and validate configuration from local storage. */
 export async function loadConfig(): Promise<Config> {
   const stored = await browser.storage.local.get(CONFIG_STORAGE_KEY);
-  return migrateConfig(stored[CONFIG_STORAGE_KEY]);
+  const value = stored[CONFIG_STORAGE_KEY];
+  const config = migrateConfig(value);
+  const storedVersion =
+    isRecord(value) && typeof value.version === "number"
+      ? value.version
+      : undefined;
+  if (storedVersion !== config.version) {
+    await browser.storage.local.set({ [CONFIG_STORAGE_KEY]: config });
+  }
+  return config;
 }
 
 /** Merge and persist a validated top-level configuration patch. */

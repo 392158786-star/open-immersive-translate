@@ -50,7 +50,7 @@ describe("paragraph scanner fixtures", () => {
     expect(result).toEqual([
       "{1}Crash{/1} when saving",
       "Run {1} before opening the issue.",
-      "Read {1}the guide{/1} for details.",
+      "Read the guide for details.",
     ]);
   });
 
@@ -171,6 +171,56 @@ describe("paragraph scanner fixtures", () => {
     `);
 
     expect(result).toEqual(["Visible paragraph."]);
+  });
+
+  it("translates visible children of display-contents containers", () => {
+    const doc = load(
+      '<main style="display:contents"><p>Visible inside contents.</p></main>',
+    );
+    const main = doc.querySelector("main");
+    expect(main).not.toBeNull();
+    Object.defineProperty(main, "checkVisibility", {
+      value: () => false,
+    });
+
+    expect(
+      extractParagraphs(doc.body, rule()).map((paragraph) => paragraph.text),
+    ).toEqual(["Visible inside contents."]);
+  });
+
+  it("traverses transparent custom controls without scanning hidden panels", () => {
+    const result = texts(`
+      <mdn-dropdown style="display:contents">
+        <button>Learn</button>
+        <div style="display:none"><a href="/hidden">Hidden item</a></div>
+      </mdn-dropdown>
+    `);
+
+    expect(result).toEqual(["Learn"]);
+  });
+
+  it("translates a hidden container when responsive CSS makes it visible", () => {
+    const doc = load(`
+      <div id="desktop-navigation" hidden>
+        <nav><ul>
+          <li><a href="/universe">Universe Home</a></li>
+          <li><button><span>Basics</span></button></li>
+          <li><a href="/exoplanets">Exoplanets</a></li>
+        </ul></nav>
+      </div>
+    `);
+    const container = doc.querySelector("#desktop-navigation");
+    expect(container).not.toBeNull();
+    Object.defineProperty(container, "checkVisibility", {
+      value: () => true,
+    });
+
+    expect(
+      extractParagraphs(
+        doc.body,
+        rule({ excludeSelectors: [] }),
+      ).map((paragraph) => paragraph.text),
+    ).toEqual(["Universe Home", "{1}Basics{/1}", "Exoplanets"]);
   });
 });
 

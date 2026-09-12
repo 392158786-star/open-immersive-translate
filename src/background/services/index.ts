@@ -2,6 +2,8 @@ import { ClaudeService } from "./claude";
 import { CustomHttpService } from "./custom-http";
 import { DeepLXService } from "./deeplx";
 import { GoogleService } from "./google";
+import { MyMemoryService } from "./mymemory";
+import { LocalModelService } from "./local-model";
 import { OpenAICompatibleService } from "./openai-compatible";
 import { ChatgptOauthService } from "./chatgpt-oauth/service";
 import { MockService } from "./mock";
@@ -21,6 +23,8 @@ const services: TranslationService[] = [
   new ChatgptOauthService(),
   new ClaudeService(),
   new GoogleService(),
+  new MyMemoryService(),
+  new LocalModelService(),
   new DeepLXService(),
   new CustomHttpService(),
   new MockService(),
@@ -109,6 +113,26 @@ export function createService(
         maxBatchChars: config.maxBatchChars,
         rateLimit: config.rateLimit,
         timeoutMs: config.timeoutMs,
+      });
+    case "mymemory":
+      return new MyMemoryService({
+        id,
+        email: config.apiKey,
+        maxBatchSize: config.maxBatchSize,
+        maxBatchChars: config.maxBatchChars,
+        rateLimit: config.rateLimit,
+        timeoutMs: config.timeoutMs,
+      });
+    case "local-model":
+      return new LocalModelService({
+        id,
+        translationModel: config.model,
+        academicModel: config.models?.[0],
+        device: config.localDevice,
+        dtype: config.localDtype,
+        maxBatchSize: config.maxBatchSize,
+        maxBatchChars: config.maxBatchChars,
+        rateLimit: config.rateLimit,
       });
     case "deeplx":
       return new DeepLXService(common);

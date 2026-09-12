@@ -16,11 +16,17 @@ describe("service registry", () => {
       "chatgpt",
       "claude",
       "google",
+      "mymemory",
+      "local-model",
       "deeplx",
       "custom-http",
       "mock",
     ]);
     expect(getService("google")?.placeholder).toEqual({
+      open: "<b>",
+      close: "</b>",
+    });
+    expect(getService("mymemory")?.placeholder).toEqual({
       open: "<b>",
       close: "</b>",
     });

@@ -77,6 +77,10 @@ export function observeMutations(
         queue(record.target);
         continue;
       }
+      if (record.type === "attributes") {
+        queue(record.target);
+        continue;
+      }
 
       for (const node of record.addedNodes) {
         queue(node);
@@ -94,6 +98,8 @@ export function observeMutations(
   });
 
   observer.observe(root, {
+    attributes: true,
+    attributeFilter: ["aria-expanded", "open"],
     characterData: true,
     childList: true,
     subtree: true,

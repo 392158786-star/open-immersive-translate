@@ -31,26 +31,47 @@ function hasTag(element: Element, tags: readonly string[]): boolean {
   return tags.some((tag) => tag.toUpperCase() === tagName);
 }
 
-function isVisible(element: Element): boolean {
-  const checkVisibility = (element as CheckVisibilityElement).checkVisibility;
-  if (typeof checkVisibility === "function") {
-    try {
-      if (
-        !checkVisibility.call(element, {
-          checkOpacity: true,
-          checkVisibilityCSS: true,
-        })
-      ) {
-        return false;
-      }
-    } catch {
-      // Older browsers and jsdom use the computed-style fallback below.
-    }
+function computedDisplay(element: Element): string | undefined {
+  const inlineDisplay = (element as HTMLElement).style?.display;
+  if (inlineDisplay) return inlineDisplay;
+  try {
+    return element.ownerDocument.defaultView?.getComputedStyle(element).display;
+  } catch {
+    return undefined;
   }
+}
 
+function isVisible(element: Element): boolean {
   let current: Element | null = element;
   while (current) {
-    if (current.hasAttribute("hidden")) return false;
+    const display = computedDisplay(current);
+    let browserCheckedVisibility = display === "contents";
+    const checkVisibility: CheckVisibilityElement["checkVisibility"] = (
+      current as CheckVisibilityElement
+    ).checkVisibility;
+    if (display !== "contents" && typeof checkVisibility === "function") {
+      try {
+        if (
+          !checkVisibility.call(current, {
+            checkOpacity: true,
+            checkVisibilityCSS: true,
+          })
+        ) {
+          return false;
+        }
+        browserCheckedVisibility = true;
+      } catch {
+        // Older browsers and jsdom use the computed-style fallback below.
+      }
+    }
+
+    if (
+      (!browserCheckedVisibility && current.hasAttribute("hidden")) ||
+      current.hasAttribute("inert") ||
+      current.getAttribute("aria-hidden")?.toLowerCase() === "true"
+    ) {
+      return false;
+    }
 
     const inlineStyle = (current as HTMLElement).style;
     if (
@@ -140,6 +161,33 @@ function plainText(nodes: readonly Node[], rule: Rule): string {
   };
 
   return nodes.map(read).join("");
+}
+
+function rawVisibleText(nodes: readonly Node[], rule: Rule): string {
+  const read = (node: Node): string => {
+    if (node.nodeType === 3) return node.nodeValue ?? "";
+    if (node.nodeType !== 1 && node.nodeType !== 11) return "";
+    if (node.nodeType === 11) {
+      return Array.from(node.childNodes, read).join("");
+    }
+
+    const element = node as Element;
+    if (shouldSkipElement(element, rule)) return "";
+    if (element.tagName === "BR") return "\n";
+    return Array.from(element.childNodes, read).join("");
+  };
+
+  return nodes.map(read).join("");
+}
+
+function containsInteractive(nodes: readonly Node[]): boolean {
+  const selector =
+    "a[href], button, input, select, textarea, summary, [role='button'], [onclick]";
+  return nodes.some((node) => {
+    if (node.nodeType !== 1) return false;
+    const element = node as Element;
+    return element.matches(selector) || Boolean(element.querySelector(selector));
+  });
 }
 
 function elementPath(element: Element): string {
@@ -238,12 +286,18 @@ export function extractParagraphs(root: Node, rule: Rule): Paragraph[] {
     const sourceText = plainText(nodes, rule).trim();
     if (sourceText.length < minimumLength) return;
 
-    const encoded = encode(
-      nodes,
-      DEFAULT_PLACEHOLDER_STYLE,
-      (element) => isStayOriginal(element, rule),
-      (element) => shouldSkipElement(element, rule),
-    );
+    const encoded =
+      rule.enableRichTranslate === false || containsInteractive(nodes)
+        ? {
+            text: rawVisibleText(nodes, rule),
+            placeholders: new Map<string, Element>(),
+          }
+        : encode(
+            nodes,
+            DEFAULT_PLACEHOLDER_STYLE,
+            (element) => isStayOriginal(element, rule),
+            (element) => shouldSkipElement(element, rule),
+          );
     const text = encoded.text.trim();
     if (!text) return;
 
@@ -345,6 +399,11 @@ export function extractParagraphs(root: Node, rule: Rule): Paragraph[] {
       ) {
         flush();
         visitElement(element);
+        continue;
+      }
+      if (computedDisplay(element) === "contents") {
+        flush();
+        visitChildren(element, container);
         continue;
       }
       if (isBlockElement(element, rule)) {

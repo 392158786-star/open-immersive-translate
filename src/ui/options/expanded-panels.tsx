@@ -415,6 +415,20 @@ export function ExpandedFeatureCards({
             }
           />
           <Toggle
+            checked={config.removeDuplicateTranslations}
+            label="自动清理重复英文和中文（保留术语和人名）"
+            onChange={(removeDuplicateTranslations) =>
+              void onPatch({ removeDuplicateTranslations })
+            }
+          />
+          <Toggle
+            checked={config.translationIntegrityMode}
+            label="翻译保护机制（防乱码、防漏译、强制分段）"
+            onChange={(translationIntegrityMode) =>
+              void onPatch({ translationIntegrityMode })
+            }
+          />
+          <Toggle
             checked={config.translationMask}
             label="遮罩模式"
             onChange={(translationMask) => void onPatch({ translationMask })}
@@ -467,14 +481,25 @@ export function ExpandedFeatureCards({
               })
             }
           />
-          <TextField
-            id="translation-color"
-            label="译文颜色"
-            value={config.translationColor ?? ""}
-            onChange={(translationColor) =>
-              void onPatch({ translationColor: translationColor || undefined })
+          <Toggle
+            checked={config.autoTranslationColor}
+            label="自动适配背景颜色"
+            onChange={(autoTranslationColor) =>
+              void onPatch({ autoTranslationColor })
             }
           />
+          {!config.autoTranslationColor && (
+            <TextField
+              id="translation-color"
+              label="译文颜色"
+              value={config.translationColor ?? ""}
+              onChange={(translationColor) =>
+                void onPatch({
+                  translationColor: translationColor || undefined,
+                })
+              }
+            />
+          )}
           <TextField
             id="translation-line-height"
             label="译文行高"

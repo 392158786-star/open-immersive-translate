@@ -32,6 +32,8 @@ describe("advanced translation rendering", () => {
       expect(css).toContain(`.imt-theme-${theme}`);
     }
     expect(css).toContain(".imt-translation-mask .imt-target");
+    expect(css).not.toContain("@keyframes imt-loading-dots");
+    expect(css).not.toContain("animation: imt-loading-dots");
   });
 
   it("applies font, size, color, and line-height variables", () => {
@@ -62,6 +64,46 @@ describe("advanced translation rendering", () => {
     expect(target.style.getPropertyValue("--imt-target-font-size")).toBe("18px");
     expect(target.style.getPropertyValue("--imt-target-color")).toBe("#123456");
     expect(target.style.getPropertyValue("--imt-target-line-height")).toBe("1.8");
+  });
+
+  it("uses white text on black backgrounds and black text on light backgrounds", () => {
+    document.body.innerHTML = `
+      <div style="background-color: rgb(0, 0, 0)"><p id="dark">Dark source</p></div>
+      <div style="background-color: rgb(23, 23, 27)"><p id="near-black">Near-black source</p></div>
+      <div style="background-color: rgb(0, 0, 0)"><p id="transparent" style="background-color: transparent">Transparent source</p></div>
+      <div style="background-color: rgb(255, 255, 255)"><p id="light">Light source</p></div>`;
+    const render = (id: string): HTMLElement => {
+      const container = document.querySelector(`#${id}`)!;
+      const paragraph: Paragraph = {
+        id,
+        container,
+        nodes: [...container.childNodes],
+        text: "Source",
+        placeholders: new Map(),
+      };
+      const fragment = document.createDocumentFragment();
+      fragment.append("Target");
+      return renderTranslation(paragraph, fragment, {
+        mode: "dual",
+        theme: "none",
+        wrapperTag: "font",
+        prefix: "smart",
+        automaticColor: true,
+      });
+    };
+
+    expect(render("dark").style.getPropertyValue("--imt-target-color")).toBe(
+      "#ffffff",
+    );
+    expect(
+      render("near-black").style.getPropertyValue("--imt-target-color"),
+    ).toBe("#ffffff");
+    expect(
+      render("transparent").style.getPropertyValue("--imt-target-color"),
+    ).toBe("#ffffff");
+    expect(render("light").style.getPropertyValue("--imt-target-color")).toBe(
+      "#000000",
+    );
   });
 
   it("toggles mask mode and injects a global custom CSS string once", () => {

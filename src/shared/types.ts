@@ -66,6 +66,8 @@ export interface TranslateParagraph {
   id: string;
   text: string;
   priority?: TranslationPriority;
+  /** Proper names or technical terms that must survive duplicate cleanup. */
+  protectedTerms?: string[];
 }
 
 /** Optional page context available to context-aware translation prompts. */
@@ -94,6 +96,43 @@ export interface TranslationStreamOptions {
 export interface TranslationUsage {
   inputTokens?: number;
   outputTokens?: number;
+}
+
+/** One public result used to explain an academic term. */
+export interface AcademicSource {
+  id: string;
+  title: string;
+  url: string;
+  source: "openalex" | "crossref" | "semantic-scholar";
+  year?: number;
+  authors?: string[];
+  venue?: string;
+  snippet?: string;
+}
+
+/** Context-specific knowledge for one academic term. */
+export interface AcademicTermKnowledge {
+  id: string;
+  term: string;
+  translation: string;
+  definition: string;
+  domain: string;
+  aliases: string[];
+  summary: string;
+  confidence: number;
+  sources: AcademicSource[];
+  contexts: string[];
+  updatedAt: number;
+}
+
+/** Settings for contextual academic-term assistance. */
+export interface AcademicConfig {
+  enabled: boolean;
+  service?: string;
+  showInlineTranslation: boolean;
+  maxTermsPerParagraph: number;
+  cacheDays: number;
+  searchSources: Array<"openalex" | "crossref" | "semantic-scholar">;
 }
 
 /** A successful, ordered response for a translation batch. */
@@ -174,6 +213,8 @@ export type ServiceKind =
   | "claude"
   | "gemini"
   | "google"
+  | "mymemory"
+  | "local-model"
   | "bing"
   | "azure-translator"
   | "deepl"
@@ -183,6 +224,7 @@ export type ServiceKind =
   | "tencent"
   | "baidu"
   | "youdao"
+  | "youdao-free"
   | "caiyun"
   | "aliyun"
   | "papago"
@@ -228,6 +270,8 @@ export interface ServiceConfig {
   stream?: boolean;
   reasoningEffort?: ReasoningEffort;
   reasoningEffortAssistant?: ReasoningEffort;
+  localDevice?: "auto" | "webgpu" | "wasm";
+  localDtype?: "q4" | "q4f16" | "fp16" | "q8" | "int8";
 }
 
 /** How source and translated text are displayed. */
@@ -364,11 +408,14 @@ export interface Config {
       suggestions: string;
     };
   };
+  academic: AcademicConfig;
   translationModeUrlPattern: TranslationModePattern;
   translationModeLanguagePattern: TranslationModePattern;
   translationThemePatterns: Record<string, string[]>;
   translateMainOnly: boolean;
   translateToPageEndImmediately: boolean;
+  removeDuplicateTranslations: boolean;
+  translationIntegrityMode: boolean;
   immediateTranslationConcurrency: number;
   translationMask: boolean;
   enableEditTranslation: boolean;
@@ -377,6 +424,7 @@ export interface Config {
   mainFrameMinTextCount: number;
   contextWordLimit: number;
   translationFontSize?: string | number;
+  autoTranslationColor: boolean;
   translationColor?: string;
   translationLineHeight?: string | number;
   globalCustomCss: string;

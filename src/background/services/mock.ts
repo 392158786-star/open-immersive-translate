@@ -33,7 +33,7 @@ export class MockService extends BaseService {
     if (signal.aborted) throw new Error("Translation was cancelled.");
     return {
       texts: request.texts.map(
-        (text) => `[zh] ${applyGlossary(text, request.glossary)}`,
+        (text) => `[zh] 翻译文本 ${applyGlossary(text, request.glossary)}`,
       ),
     };
   }
@@ -43,7 +43,7 @@ export class MockService extends BaseService {
     signal: AbortSignal,
   ): Promise<string> {
     if (signal.aborted) throw new Error("Translation was cancelled.");
-    return `[zh] ${request.text}`;
+    return `[zh] 翻译文本 ${request.text}`;
   }
 
   async onPartial(

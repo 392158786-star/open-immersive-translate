@@ -1,6 +1,10 @@
 node_modules/
+.edge-*/
 dist/
+dist-chromium-compat/
+dist-chromium-mv2/
 dist-firefox/
+dist-safari/
 dist-userscript/
 .vite/
 playwright-report/

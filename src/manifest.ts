@@ -2,11 +2,13 @@ import { defineManifest } from "@crxjs/vite-plugin";
 
 export default defineManifest({
   manifest_version: 3,
-  name: "Bilingual Translator",
-  description: "Paragraph-level bilingual web translation.",
-  version: "0.0.1",
+  name: "双语翻译助手",
+  description: "无需配置，打开网页即可进行段落级中英双语翻译。",
+  version: "0.3.3",
   permissions: [
     "storage",
+    "unlimitedStorage",
+    "offscreen",
     "alarms",
     "activeTab",
     "contextMenus",
@@ -85,5 +87,9 @@ export default defineManifest({
   options_page: "options.html",
   action: {
     default_popup: "popup.html",
+  },
+  content_security_policy: {
+    extension_pages:
+      "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'; worker-src 'self'",
   },
 });

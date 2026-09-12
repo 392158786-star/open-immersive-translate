@@ -15,6 +15,7 @@ import { init as initHoverTranslation } from "../features/hover-translate";
 import { init as initInputTranslation } from "../features/input-translate";
 import { init as initSelectionTranslation } from "../features/selection-translate";
 import { init as initAiWriting } from "../features/ai-writing";
+import { init as initAcademicTerms } from "../features/academic-terms";
 import { init as initSearchEnhancement } from "../features/search-enhancement";
 import { initSubtitles } from "../features/subtitle";
 import { onUrlChange } from "../observe/url-change";
@@ -32,6 +33,10 @@ export interface ImtPhase3DebugState {
   ready: boolean;
   active: boolean;
   config?: Config;
+  rule?: {
+    id?: string;
+    selectors?: string[];
+  };
   error?: unknown;
 }
 
@@ -59,18 +64,29 @@ function showSelectionTranslation(
     "position:fixed;right:20px;bottom:20px;z-index:2147483647;max-width:360px;padding:12px;border:1px solid #ddd;border-radius:8px;background:#fff;color:#111;box-shadow:0 8px 24px rgb(0 0 0 / 20%);font:14px/1.5 system-ui";
   host.textContent = controllerT("selectionTranslating");
   document.documentElement.append(host);
-  void controller
-    .translateText(
-      text,
-      controller.config.sourceLanguage,
-      controller.config.targetLanguage,
-    )
-    .then((translation) => {
-      if (host.isConnected) host.textContent = translation;
-    })
-    .catch(() => {
-      if (host.isConnected) host.textContent = controllerT("translationFailed");
-    });
+  let retryAttempt = 0;
+  const requestTranslation = (): void => {
+    if (!host.isConnected) return;
+    void controller
+      .translateText(
+        text,
+        controller.config.sourceLanguage,
+        controller.config.targetLanguage,
+      )
+      .then((translation) => {
+        if (host.isConnected) host.textContent = translation;
+      })
+      .catch(() => {
+        if (!host.isConnected) return;
+        if (retryAttempt >= 3) {
+          host.remove();
+          return;
+        }
+        retryAttempt += 1;
+        window.setTimeout(requestTranslation, 800 * 2 ** (retryAttempt - 1));
+      });
+  };
+  requestTranslation();
 }
 
 /** Register the phase-3 page controller. The content entry calls this once. */
@@ -126,7 +142,7 @@ export async function init(): Promise<() => void> {
       },
       translateText: (text, from, to) => current.translateText(text, from, to),
       translateParagraph: (container) => current.translateParagraph(container),
-      toggleTranslate: () => current.toggleTranslate(),
+      toggleTranslate: (scope) => current.toggleTranslate(scope),
       isTranslated: () => current.isTranslated(),
     };
     featureDisposers = [
@@ -135,6 +151,7 @@ export async function init(): Promise<() => void> {
       initSelectionTranslation(context),
       initInputTranslation(context),
       initAiWriting(context),
+      initAcademicTerms(context),
       initSearchEnhancement(context),
       initSubtitles(context),
     ];
@@ -182,6 +199,10 @@ export async function init(): Promise<() => void> {
     debugState.ready = true;
     debugState.error = undefined;
     debugState.config = config;
+    debugState.rule = {
+      id: rule.id,
+      selectors: [...(rule.selectors ?? [])],
+    };
     debugState.active = controller.isTranslated();
   };
 

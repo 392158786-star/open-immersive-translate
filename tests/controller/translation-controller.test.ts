@@ -8,6 +8,7 @@ const controllerStorage = vi.hoisted(() => ({
 }));
 const browserMock = vi.hoisted(() => ({
   runtime: {
+    sendMessage: vi.fn(async () => ({})),
     connect: vi.fn(() => ({
       postMessage: vi.fn((message: unknown) => portPosts.push(message)),
       onMessage: {
@@ -41,9 +42,14 @@ vi.mock("webextension-polyfill", () => ({ default: browserMock }));
 
 import { generalRule } from "../../src/background/rules/defaults";
 import { DEFAULT_CONFIG } from "../../src/shared/config";
-import { TranslationController } from "../../src/content/controller/translation-controller";
+import {
+  TRANSLATION_SESSION_ACTIVE_KEY,
+  TRANSLATION_SESSION_MODE_KEY,
+  TranslationController,
+} from "../../src/content/controller/translation-controller";
 import { TRANSLATION_OVERRIDES_KEY } from "../../src/content/controller/editable";
 import { extractParagraphs } from "../../src/content/extract/scanner";
+import { removeAll as removeRenderedTranslations } from "../../src/content/render/inject";
 import type { AdvancedPageConfig } from "../../src/shared/j-types";
 import type { Config } from "../../src/shared/types";
 
@@ -57,6 +63,8 @@ function config(): Config {
 
 afterEach(() => {
   vi.useRealTimers();
+  vi.unstubAllGlobals();
+  removeRenderedTranslations(document);
   portPosts.length = 0;
   portListeners.length = 0;
   disconnectListeners.length = 0;
@@ -65,9 +73,62 @@ afterEach(() => {
   document.documentElement.lang = "";
   document.head.replaceChildren();
   document.body.replaceChildren();
+  window.sessionStorage.clear();
+  window.localStorage.clear();
 });
 
 describe("TranslationController", () => {
+  it("remembers mode and active state for same-tab navigation", () => {
+    const controller = new TranslationController(config(), generalRule);
+
+    controller.setMode("translation");
+    expect(window.sessionStorage.getItem(TRANSLATION_SESSION_MODE_KEY)).toBe(
+      "translation",
+    );
+    expect(window.localStorage.getItem(TRANSLATION_SESSION_MODE_KEY)).toBe(
+      "translation",
+    );
+
+    controller.togglePage();
+    expect(window.sessionStorage.getItem(TRANSLATION_SESSION_ACTIVE_KEY)).toBe(
+      "1",
+    );
+    expect(window.localStorage.getItem(TRANSLATION_SESSION_ACTIVE_KEY)).toBe(
+      "1",
+    );
+    window.sessionStorage.clear();
+    const reopened = new TranslationController(config(), generalRule);
+    expect(reopened.shouldAutoTranslate()).toBe(true);
+    expect(reopened.config.translationMode).toBe("translation");
+    reopened.destroy();
+    controller.togglePage();
+    expect(window.sessionStorage.getItem(TRANSLATION_SESSION_ACTIVE_KEY)).toBe(
+      "0",
+    );
+    controller.destroy();
+  });
+
+  it("uses built-in translations for common navigation labels", async () => {
+    vi.useFakeTimers();
+    document.body.innerHTML = "<article><p>HOME</p><p>CHINA</p></article>";
+    const controller = new TranslationController(
+      Object.assign(config(), {
+        translateToPageEndImmediately: true,
+      }) as AdvancedPageConfig,
+      { ...generalRule, isTranslateTitle: false },
+    );
+    controller.start("whole");
+    await vi.advanceTimersByTimeAsync(150);
+
+    expect(
+      [...document.querySelectorAll('[data-imt="target"]')].map(
+        (element) => element.textContent,
+      ),
+    ).toEqual(["首页", "中国"]);
+    expect(portPosts).toHaveLength(0);
+    controller.destroy();
+  });
+
   it("translates only main prose and sends domain glossary plus page context", async () => {
     vi.useFakeTimers();
     document.title = "Test article";
@@ -86,15 +147,21 @@ describe("TranslationController", () => {
       },
       translationThemePatterns: { paper: ["http://localhost:*/*"] },
       translationFontSize: "17px",
+      autoTranslationColor: false,
       translationColor: "#123456",
       translationLineHeight: 1.7,
       globalCustomCss: "body { --workstream-j-global: 1; }",
       contextWordLimit: 5,
+      translateToPageEndImmediately: false,
     }) as AdvancedPageConfig;
     const states = vi.fn();
-    const controller = new TranslationController(advanced, generalRule, {
+    const controller = new TranslationController(
+      advanced,
+      { ...generalRule, isTranslateTitle: false },
+      {
       reportState: states,
-    });
+      },
+    );
     controller.start("main");
     expect(
       document.querySelector('style[data-imt="style"]')?.textContent,
@@ -147,6 +214,340 @@ describe("TranslationController", () => {
     expect(states).toHaveBeenCalledWith(
       expect.objectContaining({ status: "done" }),
     );
+    controller.destroy();
+  });
+
+  it("keeps interactive page chrome intact in whole-page mode", async () => {
+    vi.useFakeTimers();
+    document.title = "Clinical knowledge article";
+    document.body.innerHTML = `
+      <header class="site-header"><a href="/explore">Explore content</a></header>
+      <article><p>Large language models encode clinical knowledge.</p></article>`;
+    const rule = {
+      ...generalRule,
+      isTranslateTitle: false,
+      excludeSelectors: [".site-header"],
+    };
+    const controller = new TranslationController(config(), rule);
+    controller.start("whole");
+    await vi.advanceTimersByTimeAsync(150);
+
+    expect(document.querySelector('header [data-imt="target"]')).toBeNull();
+    expect(
+      document.querySelector<HTMLAnchorElement>('header a')?.getAttribute(
+        "href",
+      ),
+    ).toBe("/explore");
+    controller.destroy();
+  });
+
+  it("rescans and translates new content after scrolling", async () => {
+    vi.useFakeTimers();
+    class IdleIntersectionObserver {
+      observe(): void {}
+      unobserve(): void {}
+      disconnect(): void {}
+    }
+    vi.stubGlobal(
+      "IntersectionObserver",
+      IdleIntersectionObserver as unknown as typeof IntersectionObserver,
+    );
+    document.body.innerHTML =
+      "<article><p id='top'>The first article paragraph.</p></article>";
+    const rect = (top: number): DOMRect =>
+      ({
+        top,
+        bottom: top + 30,
+        left: 0,
+        right: 500,
+        width: 500,
+        height: 30,
+        x: 0,
+        y: top,
+        toJSON: () => ({}),
+      }) as DOMRect;
+    const top = document.querySelector("#top")!;
+    top.getBoundingClientRect = () => rect(0);
+    const controller = new TranslationController(config(), generalRule);
+    const visibleSpy = vi.spyOn(
+      controller as unknown as { translateVisibleParagraphs(): void },
+      "translateVisibleParagraphs",
+    );
+    controller.start("whole");
+    await vi.advanceTimersByTimeAsync(150);
+
+    const lower = document.createElement("p");
+    lower.textContent = "A newly loaded paragraph below the first viewport.";
+    lower.getBoundingClientRect = () => rect(180);
+    document.querySelector("article")!.append(lower);
+    document.dispatchEvent(new Event("scroll"));
+    await vi.advanceTimersByTimeAsync(200);
+    expect(visibleSpy).toHaveBeenCalled();
+
+    const requests = portPosts.filter(
+      (
+        item,
+      ): item is {
+        type: "translate";
+        paragraphs: Array<{ text: string }>;
+      } => (item as { type?: string }).type === "translate",
+    );
+    expect(
+      requests.some((request) =>
+        request.paragraphs.some(({ text }) =>
+          text.includes("newly loaded paragraph"),
+        ),
+      ),
+    ).toBe(true);
+    controller.destroy();
+  });
+
+  it("rescans content revealed by scrolling without a DOM mutation", async () => {
+    vi.useFakeTimers();
+    class IdleIntersectionObserver {
+      observe(): void {}
+      unobserve(): void {}
+      disconnect(): void {}
+    }
+    vi.stubGlobal(
+      "IntersectionObserver",
+      IdleIntersectionObserver as unknown as typeof IntersectionObserver,
+    );
+    document.body.innerHTML = `
+      <article>
+        <p id="top">The first article paragraph stays visible.</p>
+        <p id="lower" style="display: none">A hidden lower article paragraph stays in the document until it is revealed.</p>
+      </article>`;
+    const rect = (top: number): DOMRect =>
+      ({
+        top,
+        bottom: top + 30,
+        left: 0,
+        right: 500,
+        width: 500,
+        height: 30,
+        x: 0,
+        y: top,
+        toJSON: () => ({}),
+      }) as DOMRect;
+    document.querySelector("#top")!.getBoundingClientRect = () => rect(0);
+    const lower = document.querySelector<HTMLElement>("#lower")!;
+    lower.getBoundingClientRect = () => rect(240);
+    const controller = new TranslationController(config(), generalRule);
+    controller.start("whole");
+    await vi.advanceTimersByTimeAsync(150);
+
+    lower.style.display = "";
+    document.dispatchEvent(new Event("scroll"));
+    await vi.advanceTimersByTimeAsync(200);
+
+    const requests = portPosts.filter(
+      (
+        item,
+      ): item is {
+        type: "translate";
+        paragraphs: Array<{ text: string }>;
+      } => (item as { type?: string }).type === "translate",
+    );
+    expect(
+      requests.some((request) =>
+        request.paragraphs.some(({ text }) =>
+          text.includes("hidden lower article paragraph"),
+        ),
+      ),
+    ).toBe(true);
+    controller.destroy();
+  });
+
+  it("reapplies a cached translation when a virtualized paragraph is recreated", async () => {
+    vi.useFakeTimers();
+    document.body.innerHTML =
+      "<article><p id='item'>A virtualized paragraph that stays in the article.</p></article>";
+    const advanced = Object.assign(config(), {
+      translateToPageEndImmediately: true,
+      translationIntegrityMode: false,
+    }) as AdvancedPageConfig;
+    const controller = new TranslationController(advanced, {
+      ...generalRule,
+      isTranslateTitle: false,
+    });
+    controller.start("whole");
+    await vi.advanceTimersByTimeAsync(150);
+
+    const firstRequest = portPosts.find(
+      (
+        item,
+      ): item is {
+        type: "translate";
+        requestId: string;
+        paragraphs: Array<{ id: string; text: string }>;
+      } => (item as { type?: string }).type === "translate",
+    );
+    expect(firstRequest).toBeDefined();
+    portListeners[0]?.({
+      type: "translateResult",
+      requestId: firstRequest?.requestId,
+      results:
+        firstRequest?.paragraphs.map(({ id }) => ({
+          id,
+          text: "已缓存的译文",
+        })) ?? [],
+      done: true,
+    });
+    await vi.advanceTimersByTimeAsync(800);
+
+    const replacement = document.createElement("p");
+    replacement.textContent =
+      "A virtualized paragraph that stays in the article.";
+    replacement.getBoundingClientRect = () =>
+      ({
+        top: 0,
+        bottom: 30,
+        left: 0,
+        right: 500,
+        width: 500,
+        height: 30,
+        x: 0,
+        y: 0,
+        toJSON: () => ({}),
+      }) as DOMRect;
+    document.querySelector("p")!.replaceWith(replacement);
+    document.dispatchEvent(new Event("scroll"));
+    await vi.advanceTimersByTimeAsync(200);
+
+    expect(replacement.querySelector('[data-imt="target"]')?.textContent).toBe(
+      "已缓存的译文",
+    );
+    expect(
+      portPosts.filter((item) => (item as { type?: string }).type === "translate"),
+    ).toHaveLength(1);
+    controller.destroy();
+  });
+
+  it("does not duplicate an unchanged translation", async () => {
+    vi.useFakeTimers();
+    const source =
+      "This paragraph should stay visible only once when translation is unchanged.";
+    document.body.innerHTML = `<article><p>${source}</p></article>`;
+    const advanced = Object.assign(config(), {
+      translateToPageEndImmediately: true,
+      translationMode: "dual",
+    }) as AdvancedPageConfig;
+    const controller = new TranslationController(advanced, {
+      ...generalRule,
+      isTranslateTitle: false,
+    });
+    controller.start("whole");
+    await vi.advanceTimersByTimeAsync(150);
+
+    const request = portPosts.find(
+      (
+        item,
+      ): item is {
+        type: "translate";
+        requestId: string;
+        paragraphs: Array<{ id: string; text: string }>;
+      } => (item as { type?: string }).type === "translate",
+    );
+    expect(request).toBeDefined();
+    portListeners[0]?.({
+      type: "translateResult",
+      requestId: request?.requestId,
+      results: request?.paragraphs.map(({ id, text }) => ({ id, text })) ?? [],
+      done: true,
+    });
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(document.querySelector('[data-imt="target"]')).toBeNull();
+    expect(
+      document.querySelector("p")?.textContent?.match(
+        /This paragraph should stay visible only once when translation is unchanged\./g,
+      ),
+    ).toHaveLength(1);
+    controller.destroy();
+  });
+
+  it("removes echoed English from a translated result when deduplication is enabled", async () => {
+    vi.useFakeTimers();
+    const source =
+      "This English sentence should not be repeated in the translated result.";
+    document.body.innerHTML = `<article><p>${source}</p></article>`;
+    const controller = new TranslationController(config(), {
+      ...generalRule,
+      isTranslateTitle: false,
+    });
+    controller.start("whole");
+    await vi.advanceTimersByTimeAsync(150);
+
+    const request = portPosts.find(
+      (
+        item,
+      ): item is {
+        type: "translate";
+        requestId: string;
+        paragraphs: Array<{ id: string }>;
+      } => (item as { type?: string }).type === "translate",
+    );
+    expect(request).toBeDefined();
+    portListeners[0]?.({
+      type: "translateResult",
+      requestId: request?.requestId,
+      results: [
+        {
+          id: request?.paragraphs[0]?.id,
+          text: `${source} 这段英文不应在译文中重复出现。`,
+        },
+      ],
+      done: true,
+    });
+
+    expect(document.querySelector('[data-imt="target"]')?.textContent).toBe(
+      "这段英文不应在译文中重复出现。",
+    );
+    controller.destroy();
+  });
+
+  it("keeps existing translation nodes untouched during rescan", async () => {
+    vi.useFakeTimers();
+    document.body.innerHTML =
+      "<article><p>A paragraph that has already been translated.</p></article>";
+    const advanced = Object.assign(config(), {
+      translateToPageEndImmediately: true,
+    }) as AdvancedPageConfig;
+    const controller = new TranslationController(advanced, generalRule);
+    controller.start("whole");
+    await vi.advanceTimersByTimeAsync(150);
+
+    const request = portPosts.find(
+      (
+        item,
+      ): item is {
+        type: "translate";
+        requestId: string;
+        paragraphs: Array<{ id: string; text: string }>;
+      } => (item as { type?: string }).type === "translate",
+    );
+    expect(request).toBeDefined();
+    portListeners[0]?.({
+      type: "translateResult",
+      requestId: request?.requestId,
+      results:
+        request?.paragraphs.map(({ id }) => ({
+          id,
+          text: "已经翻译好的内容。",
+        })) ?? [],
+      done: true,
+    });
+    await vi.advanceTimersByTimeAsync(0);
+
+    const existing = document.querySelector('[data-imt="target"]');
+    expect(existing).not.toBeNull();
+    await (
+      controller as unknown as { rescan(): Promise<void> }
+    ).rescan();
+
+    expect(document.querySelector('[data-imt="target"]')).toBe(existing);
+    expect(existing?.textContent).toBe("已经翻译好的内容。");
     controller.destroy();
   });
 
@@ -217,6 +618,271 @@ describe("TranslationController", () => {
     expect(document.querySelector('[data-imt="target"]')?.textContent).toBe(
       "  一\n\t二  ",
     );
+    controller.destroy();
+  });
+
+  it("retries failures silently three times and then leaves the source unchanged", async () => {
+    vi.useFakeTimers();
+    const source =
+      "A long academic paragraph that should be retried without displaying an error card.";
+    document.body.innerHTML = `<article><p>${source}</p></article>`;
+    const advanced = Object.assign(config(), {
+      translateToPageEndImmediately: true,
+      translationIntegrityMode: false,
+    }) as AdvancedPageConfig;
+    const controller = new TranslationController(advanced, {
+      ...generalRule,
+      isTranslateTitle: false,
+    });
+    controller.start("whole");
+    await vi.advanceTimersByTimeAsync(150);
+
+    const requests = (): Array<{
+      requestId: string;
+      paragraphs: Array<{ id: string }>;
+    }> =>
+      portPosts.filter(
+        (
+          item,
+        ): item is {
+          type: "translate";
+          requestId: string;
+          paragraphs: Array<{ id: string }>;
+        } => (item as { type?: string }).type === "translate",
+      );
+
+    const failLatestRequest = (): void => {
+      const request = requests().at(-1);
+      expect(request).toBeDefined();
+      portListeners[0]?.({
+        type: "translateResult",
+        requestId: request?.requestId,
+        results:
+          request?.paragraphs.map(({ id }) => ({
+            id,
+            error: {
+              code: "NETWORK",
+              message: "temporary failure",
+              retryable: true,
+              serviceId: "test",
+            },
+          })) ?? [],
+        done: true,
+      });
+    };
+
+    failLatestRequest();
+    expect(document.querySelector('[data-imt="error"]')).toBeNull();
+    expect(document.querySelector("p")?.textContent).toBe(source);
+
+    await vi.advanceTimersByTimeAsync(800);
+    expect(requests()).toHaveLength(2);
+    failLatestRequest();
+    expect(document.querySelector('[data-imt="error"]')).toBeNull();
+
+    await vi.advanceTimersByTimeAsync(1_600);
+    expect(requests()).toHaveLength(3);
+    failLatestRequest();
+    expect(document.querySelector('[data-imt="error"]')).toBeNull();
+
+    await vi.advanceTimersByTimeAsync(3_200);
+    expect(requests()).toHaveLength(4);
+    failLatestRequest();
+    expect(document.querySelector('[data-imt="error"]')).toBeNull();
+    expect(document.querySelector("p")?.textContent).toBe(source);
+
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(requests()).toHaveLength(4);
+    await (
+      controller as unknown as { rescan(): Promise<void> }
+    ).rescan();
+    expect(requests()).toHaveLength(4);
+    controller.destroy();
+  });
+
+  it("treats an empty translation as invalid and requests it again", async () => {
+    vi.useFakeTimers();
+    const source =
+      "A middle paragraph that must not be replaced by an empty translation.";
+    document.body.innerHTML = `<article><p>${source}</p></article>`;
+    const advanced = Object.assign(config(), {
+      translateToPageEndImmediately: true,
+    }) as AdvancedPageConfig;
+    const controller = new TranslationController(advanced, {
+      ...generalRule,
+      isTranslateTitle: false,
+    });
+    controller.start("whole");
+    await vi.advanceTimersByTimeAsync(150);
+
+    const first = portPosts.find(
+      (
+        item,
+      ): item is {
+        type: "translate";
+        requestId: string;
+        paragraphs: Array<{ id: string }>;
+      } => (item as { type?: string }).type === "translate",
+    )!;
+    portListeners[0]?.({
+      type: "translateResult",
+      requestId: first.requestId,
+      results: [{ id: first.paragraphs[0]!.id, text: "" }],
+      done: true,
+    });
+    await vi.advanceTimersByTimeAsync(800);
+
+    const requests = portPosts.filter(
+      (item) => (item as { type?: string }).type === "translate",
+    );
+    expect(requests).toHaveLength(2);
+    expect(document.querySelector('[data-imt="error"]')).toBeNull();
+
+    const second = requests[1] as {
+      requestId: string;
+      paragraphs: Array<{ id: string }>;
+    };
+    portListeners[0]?.({
+      type: "translateResult",
+      requestId: second.requestId,
+      results: [{ id: second.paragraphs[0]!.id, text: "有效的译文" }],
+      done: true,
+    });
+    expect(document.querySelector('[data-imt="target"]')?.textContent).toBe(
+      "有效的译文",
+    );
+    controller.destroy();
+  });
+
+  it("retries a request that never receives a background result", async () => {
+    vi.useFakeTimers();
+    document.body.innerHTML =
+      "<article><p>A paragraph that waits too long for a translation result.</p></article>";
+    const advanced = Object.assign(config(), {
+      translateToPageEndImmediately: true,
+    }) as AdvancedPageConfig;
+    const controller = new TranslationController(advanced, {
+      ...generalRule,
+      isTranslateTitle: false,
+    });
+    controller.start("whole");
+    await vi.advanceTimersByTimeAsync(150);
+
+    const translationRequests = (): unknown[] =>
+      portPosts.filter(
+        (item) => (item as { type?: string }).type === "translate",
+      );
+    expect(translationRequests()).toHaveLength(1);
+
+    await vi.advanceTimersByTimeAsync(20_000);
+    expect(
+      portPosts.some((item) => (item as { type?: string }).type === "cancel"),
+    ).toBe(true);
+    expect(document.querySelector('[data-imt="error"]')).toBeNull();
+
+    await vi.advanceTimersByTimeAsync(800);
+    expect(translationRequests()).toHaveLength(2);
+    controller.destroy();
+  });
+
+  it("does not translate an ancestor after its child prose blocks are queued", async () => {
+    vi.useFakeTimers();
+    document.body.innerHTML = `
+      <article>
+        <ul>
+          <li>
+            <h4>SSC drives sustainable development across the region.</h4>
+            <h5>Stefan Liller is the representative for this initiative.</h5>
+          </li>
+        </ul>
+      </article>`;
+    const advanced = Object.assign(config(), {
+      translateToPageEndImmediately: true,
+    }) as AdvancedPageConfig;
+    const controller = new TranslationController(advanced, {
+      ...generalRule,
+      isTranslateTitle: false,
+    });
+    controller.start("whole");
+    await vi.advanceTimersByTimeAsync(150);
+
+    const request = portPosts.find(
+      (
+        item,
+      ): item is {
+        type: "translate";
+        paragraphs: Array<{ text: string }>;
+      } => (item as { type?: string }).type === "translate",
+    );
+    const texts = request?.paragraphs.map(({ text }) => text) ?? [];
+    expect(
+      texts.some((text) =>
+        text.includes("drives sustainable development across the region"),
+      ),
+    ).toBe(true);
+    expect(
+      texts.some((text) => text.includes("Stefan Liller")),
+    ).toBe(true);
+    expect(
+      texts.some(
+        (text) =>
+          text.includes("SSC drives sustainable development") &&
+          text.includes("Stefan Liller"),
+      ),
+    ).toBe(false);
+    controller.destroy();
+  });
+
+  it("splits a long paragraph before calling the translation service", async () => {
+    vi.useFakeTimers();
+    const sentenceA = `${"A".repeat(220)}.`;
+    const sentenceB = `${"B".repeat(220)}.`;
+    const sentenceC = `${"C".repeat(220)}.`;
+    document.body.innerHTML = `<article><p>${sentenceA} ${sentenceB} ${sentenceC}</p></article>`;
+    const controller = new TranslationController(
+      Object.assign(config(), {
+        translateToPageEndImmediately: true,
+        removeDuplicateTranslations: false,
+      }) as AdvancedPageConfig,
+      { ...generalRule, isTranslateTitle: false },
+    );
+    controller.start("whole");
+    await vi.advanceTimersByTimeAsync(150);
+
+    const request = portPosts.find(
+      (
+        item,
+      ): item is {
+        type: "translate";
+        requestId: string;
+        paragraphs: Array<{ id: string; text: string }>;
+      } => (item as { type?: string }).type === "translate",
+    );
+    expect(request).toBeDefined();
+    expect(request?.paragraphs.length).toBeGreaterThan(1);
+    expect(
+      request?.paragraphs.every(
+        ({ id, text }) => id.includes("::segment-") && text.length <= 480,
+      ),
+    ).toBe(true);
+
+    portListeners[0]?.({
+      type: "translateResult",
+      requestId: request?.requestId,
+      results:
+        request?.paragraphs.map(({ id }, index) => ({
+          id,
+          text: `\u8bd1\u6587${index}`,
+        })) ?? [],
+      done: true,
+    });
+
+    const expected = (request?.paragraphs ?? [])
+      .map((_, index) => `\u8bd1\u6587${index}`)
+      .join(" ");
+    expect(
+      document.querySelector('[data-imt="target"]')?.textContent,
+    ).toBe(expected);
     controller.destroy();
   });
 });

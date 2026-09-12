@@ -35,6 +35,7 @@ export function withKDefaults(value: unknown): KConfig {
   ) as Partial<Config>;
   return {
     ...config,
+    autoTranslationColor: config.autoTranslationColor ?? true,
     input: {
       enabled: true,
       trigger: "//",

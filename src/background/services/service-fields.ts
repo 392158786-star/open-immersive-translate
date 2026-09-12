@@ -47,6 +47,7 @@ const credentials: Record<string, readonly ServiceI18nKey[]> = {
   tencent: ["appId", "secret", "region"],
   baidu: ["appId", "secret"],
   youdao: ["appId", "secret"],
+  "youdao-free": [],
   caiyun: ["apiKey"],
   aliyun: ["appId", "secret", "region"],
   papago: ["appId", "secret"],
@@ -56,6 +57,7 @@ const credentials: Record<string, readonly ServiceI18nKey[]> = {
   openl: ["apiKey", "baseUrl"],
   "azure-openai": ["apiKey", "baseUrl", "deployment", "apiVersion"],
   google: [],
+  mymemory: ["apiKey"],
   deeplx: ["baseUrl"],
   "custom-http": [
     "baseUrl",
@@ -192,6 +194,24 @@ export function serviceFields(
         : {}),
     }));
   }
+  if (serviceId === "mymemory") {
+    return [
+      {
+        name: "apiKey",
+        label: locale === "en" ? "Contact email (optional)" : "联系邮箱（可选）",
+        type: "text",
+        hint:
+          locale === "en"
+            ? "Used only by MyMemory to request its higher free quota."
+            : "仅用于 MyMemory 提高免费额度，不填写也可以直接翻译。",
+      },
+      ...transportFields.map((name) => ({
+        name,
+        label: serviceText(name, locale),
+        type: fieldType(name),
+      })),
+    ];
+  }
   const isAi =
     Boolean(getPreset(serviceId)) ||
     ["openai-compatible", "claude", "gemini", "azure-openai"].includes(
@@ -206,7 +226,7 @@ export function serviceFields(
       ]
     : [
         ...(credentials[serviceId] ?? []),
-        ...(["google", "deeplx", "custom-http"].includes(serviceId)
+        ...(["google", "youdao-free", "deeplx", "custom-http"].includes(serviceId)
           ? transportFields.filter(
               (name) => !(credentials[serviceId] ?? []).includes(name),
             )

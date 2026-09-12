@@ -36,6 +36,8 @@ describe("Firefox manifest transform", () => {
       transformed.browser_specific_settings.gecko.data_collection_permissions,
     ).toEqual({ required: ["websiteContent"] });
     expect(transformed).not.toHaveProperty("side_panel");
+    expect(transformed.permissions).not.toContain("offscreen");
+    expect(transformed.permissions).not.toContain("sidePanel");
     expect(source.background).toEqual({
       service_worker: "src/background/worker.ts",
       type: "module",

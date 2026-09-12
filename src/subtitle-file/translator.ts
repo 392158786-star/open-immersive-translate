@@ -85,6 +85,8 @@ function translateBatch(
       glossary: config.glossaries,
       priority: "interactive",
       context: { title: "Local subtitle file" },
+      removeDuplicateTranslations: config.removeDuplicateTranslations,
+      translationIntegrityMode: config.translationIntegrityMode,
     });
   });
 }

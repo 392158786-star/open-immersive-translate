@@ -89,7 +89,8 @@ export function transformFirefoxManifest(
   delete rest.sidebar_action;
   if (Array.isArray(rest.permissions)) {
     rest.permissions = rest.permissions.filter(
-      (permission) => permission !== "sidePanel",
+      (permission) =>
+        permission !== "sidePanel" && permission !== "offscreen",
     );
   }
   const currentSettings = isRecord(browserSpecificSettings)
@@ -148,7 +149,7 @@ export default defineConfig(async (env) => {
     ],
     build: {
       outDir: "dist-firefox",
-      emptyOutDir: false,
+      emptyOutDir: true,
       rollupOptions: {
         input: {
           pdf: fileURLToPath(new URL("./src/pdf/index.html", import.meta.url)),

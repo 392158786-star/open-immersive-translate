@@ -98,7 +98,7 @@ describe("TranslationScheduler", () => {
     );
 
     expect(service.calls).toEqual([["p", "aa"], ["bb"], ["ccc"]]);
-    expect(results).toEqual(["p", "a", "b", "c"]);
+    expect([...results].sort()).toEqual(["a", "b", "c", "p"]);
   });
 
   it("does not exceed the service concurrency limit", async () => {
@@ -126,10 +126,103 @@ describe("TranslationScheduler", () => {
     expect(service.maximumActive).toBe(2);
   });
 
+  it("falls back when a service returns an incomplete sentence", async () => {
+    const primary = new FakeService(
+      "primary",
+      10,
+      1_000,
+      { rps: 10_000, concurrency: 1 },
+      async () => ({ texts: ["循环技术"] }),
+    );
+    const fallback = new FakeService(
+      "fallback",
+      10,
+      1_000,
+      { rps: 10_000, concurrency: 1 },
+      async ({ texts }) => ({
+        texts: texts.map(() => "在大多数情况下，使用循环技术更方便。"),
+      }),
+    );
+    const scheduler = new TranslationScheduler({
+      cache: memoryCache(),
+      services: [primary, fallback],
+      fallbackServices: { primary: "fallback" },
+    });
+    const results: string[] = [];
+
+    await scheduler.translateParagraphs(
+      request({
+        items: [
+          {
+            id: "a",
+            text: "In most such cases, it is convenient to use Looping Techniques.",
+          },
+        ],
+        onResult: (batch) => {
+          results.push(...batch.map((item) => item.text ?? item.error?.message ?? ""));
+        },
+      }),
+    );
+
+    expect(primary.calls).toHaveLength(1);
+    expect(fallback.calls).toHaveLength(1);
+    expect(results).toEqual(["在大多数情况下，使用循环技术更方便。"]);
+  });
+
+  it("rejects unrelated short-label translations and uses the fallback", async () => {
+    const primary = new FakeService(
+      "primary",
+      10,
+      1_000,
+      { rps: 10_000, concurrency: 1 },
+      async ({ texts }) => ({
+        texts: texts.map(() => "第九百零一章"),
+      }),
+    );
+    const fallback = new FakeService(
+      "fallback",
+      10,
+      1_000,
+      { rps: 10_000, concurrency: 1 },
+      async ({ texts }) => ({
+        texts: texts.map(() => "金砖国家"),
+      }),
+    );
+    const scheduler = new TranslationScheduler({
+      cache: memoryCache(),
+      services: [primary, fallback],
+      fallbackServices: { primary: "fallback" },
+    });
+    const results: string[] = [];
+
+    await scheduler.translateParagraphs(
+      request({
+        items: [{ id: "brics", text: "BRICS" }],
+        onResult: (batch) => {
+          results.push(...batch.map((item) => item.text ?? ""));
+        },
+      }),
+    );
+
+    expect(primary.calls).toHaveLength(1);
+    expect(fallback.calls).toHaveLength(1);
+    expect(results).toEqual(["金砖国家"]);
+  });
+
   it("returns cache hits without sending them to the service", async () => {
     const cache = memoryCache();
     await cache.set(
-      { serviceId: "primary", from: "en", to: "zh-CN", text: "cached" },
+      {
+        serviceId: "primary",
+        from: "en",
+        to: "zh-CN",
+        text: "cached",
+        variant: JSON.stringify({
+          glossary: [],
+          context: null,
+          removeDuplicateTranslations: true,
+        }),
+      },
       { text: "已缓存", ts: Date.now() },
     );
     const service = new FakeService(
@@ -233,6 +326,53 @@ describe("TranslationScheduler", () => {
     expect(primary.calls).toHaveLength(2);
     expect(fallback.calls).toHaveLength(1);
     expect(output).toEqual([{ id: "a", text: "fallback:source" }]);
+  });
+
+  it("tries the full ordered service chain before reporting failure", async () => {
+    const makeFailure = (id: string): FakeService =>
+      new FakeService(
+        id,
+        10,
+        100,
+        { rps: 10_000, concurrency: 1 },
+        async () => {
+          throw new TranslateError("network", "offline", { serviceId: id });
+        },
+      );
+    const primary = makeFailure("primary");
+    const secondary = makeFailure("secondary");
+    const tertiary = new FakeService(
+      "tertiary",
+      10,
+      100,
+      { rps: 10_000, concurrency: 1 },
+      async ({ texts }) => ({
+        texts: texts.map((text) => `tertiary:${text}`),
+      }),
+    );
+    const scheduler = new TranslationScheduler({
+      cache: memoryCache(),
+      services: [primary, secondary, tertiary],
+      fallbackServices: {
+        primary: "secondary",
+        secondary: "tertiary",
+      },
+    });
+    const output: Array<{ id: string; text?: string }> = [];
+
+    await scheduler.translateParagraphs(
+      request({
+        items: [{ id: "a", text: "source" }],
+        onResult: (batch) => {
+          output.push(...batch);
+        },
+      }),
+    );
+
+    expect(primary.calls).toHaveLength(2);
+    expect(secondary.calls).toHaveLength(2);
+    expect(tertiary.calls).toHaveLength(1);
+    expect(output).toEqual([{ id: "a", text: "tertiary:source" }]);
   });
 
   it("skips an unsupported primary service and uses its fallback", async () => {

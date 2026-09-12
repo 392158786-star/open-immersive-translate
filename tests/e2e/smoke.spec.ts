@@ -12,6 +12,9 @@ import path from "node:path";
 import { PDFDocument, StandardFonts } from "pdf-lib";
 
 interface ExtensionApi {
+  runtime: {
+    getManifest(): { permissions?: string[] };
+  };
   storage: {
     local: {
       get(key: string): Promise<Record<string, unknown>>;
@@ -90,8 +93,11 @@ async function extensionWorker(context: BrowserContext): Promise<Worker> {
 
 async function launchExtension(playwright: {
   chromium: BrowserType;
-}): Promise<{ context: BrowserContext; worker: Worker; extensionId: string }> {
-  const extensionPath = path.resolve("dist");
+}, extensionPath = path.resolve("dist")): Promise<{
+  context: BrowserContext;
+  worker: Worker;
+  extensionId: string;
+}> {
   const userDataDir = path.join(
     tmpdir(),
     `bilingual-translator-e2e-${process.pid}-${++profileSequence}`,
@@ -99,7 +105,7 @@ async function launchExtension(playwright: {
   const context = await playwright.chromium.launchPersistentContext(
     userDataDir,
     {
-      channel: "chromium",
+      channel: process.env.PW_CHANNEL ?? "chromium",
       headless: true,
       args: [
         `--disable-extensions-except=${extensionPath}`,
@@ -133,13 +139,25 @@ async function selectMockService(
     }
     if (!config) throw new Error("Extension defaults were not installed.");
     const services = config.services as Record<string, unknown>;
-    const google = services.google as Record<string, unknown> | undefined;
+    const fastService = services["youdao-free"] as
+      | Record<string, unknown>
+      | undefined;
+    const fallbackService = services.transmart as
+      | Record<string, unknown>
+      | undefined;
+    const localModel = services["local-model"] as
+      | Record<string, unknown>
+      | undefined;
     if (
-      config.service !== "google" ||
-      google?.enabled !== true ||
-      google.apiKey !== undefined
+      config.service !== "youdao-free" ||
+      fastService?.enabled !== true ||
+      fastService.fallbackService !== "transmart" ||
+      fallbackService?.enabled !== true
     ) {
-      throw new Error("Fresh-install Google defaults are invalid.");
+      throw new Error("Fresh-install fast translation defaults are invalid.");
+    }
+    if (localModel?.enabled !== true) {
+      throw new Error("Fresh-install local fallback defaults are invalid.");
     }
     await api.storage.local.set({
       config: {
@@ -238,7 +256,13 @@ test("translates article paragraphs once and restores the DOM", async ({
     await expect
       .poll(() => contentState(worker))
       .toMatchObject({ ready: true });
-    await expect.poll(() => toggleActivePage(worker)).toBe(true);
+    expect(await toggleActivePage(worker)).toBe(true);
+    await expect.poll(() => contentState(worker)).toMatchObject({
+      active: true,
+    });
+    await expect(page.locator("html")).toHaveClass(
+      /imt-translation-scroll-lock/u,
+    );
     await expect
       .poll(() =>
         page
@@ -262,7 +286,13 @@ test("translates article paragraphs once and restores the DOM", async ({
     await expect(page.locator("pre font[data-imt='target']")).toHaveCount(0);
     await expect(page.locator("code font[data-imt='target']")).toHaveCount(0);
 
-    await expect.poll(() => toggleActivePage(worker)).toBe(true);
+    expect(await toggleActivePage(worker)).toBe(true);
+    await expect.poll(() => contentState(worker)).toMatchObject({
+      active: false,
+    });
+    await expect(page.locator("html")).not.toHaveClass(
+      /imt-translation-scroll-lock/u,
+    );
     await expect(page.locator("font[data-imt='target']")).toHaveCount(0);
     await expect
       .poll(() => page.locator("body").innerHTML())
@@ -280,27 +310,26 @@ test("applies glossary entries and toggles mask and translation-only mode", asyn
     await selectMockService(worker, {
       glossaries: [{ k: "first paragraph", v: "首段术语" }],
       translateToPageEndImmediately: true,
+      translationMode: "dual",
     });
     const page = await context.newPage();
     await page.goto(`${origin}/article.html`);
     await expect
       .poll(() => contentState(worker))
       .toMatchObject({ ready: true });
-    await expect.poll(() => toggleActivePage(worker)).toBe(true);
+    expect(await toggleActivePage(worker)).toBe(true);
 
     const firstTranslation = page
       .locator("#first font[data-imt='target']")
       .first();
-    await expect(firstTranslation).toContainText("[zh] This is the 首段术语");
+    await expect(firstTranslation).toContainText(
+      "[zh] 翻译文本 首段术语",
+    );
 
-    await expect
-      .poll(() => runPageCommand(worker, "toggleTranslationMask"))
-      .toBe(true);
+    expect(await runPageCommand(worker, "toggleTranslationMask")).toBe(true);
     await expect(page.locator("html")).toHaveClass(/imt-translation-mask/u);
 
-    await expect
-      .poll(() => runPageCommand(worker, "toggleOnlyTranslation"))
-      .toBe(true);
+    expect(await runPageCommand(worker, "toggleOnlyTranslation")).toBe(true);
     await expect(page.locator("#first [data-imt='source']")).toHaveClass(
       /imt-source-hidden/u,
     );
@@ -325,7 +354,7 @@ test("opens a PDF URL and translates its extracted paragraph", async ({
 
     await expect(page.locator(".pdf-page-shell")).toHaveCount(1);
     await expect(page.locator(".pdf-translation").first()).toContainText(
-      "[zh] Tiny PDF paragraph for translation.",
+      "[zh] 翻译文本",
     );
   } finally {
     await context.close();
@@ -366,9 +395,9 @@ test("translates every cue in a local SRT file", async ({ playwright }) => {
       })
       .click();
     await expect(page.locator("tbody tr td:last-child")).toHaveText([
-      "[zh] First cue",
-      "[zh] Second cue",
-      "[zh] Third cue",
+      "[zh] 翻译文本",
+      "[zh] 翻译文本",
+      "[zh] 翻译文本",
     ]);
   } finally {
     await context.close();
@@ -394,8 +423,193 @@ test("loads the side panel and round-trips text through the mock service", async
       .getByRole("button", { name: /翻译文字|Translate text/u })
       .click();
     await expect(page.locator(".side-output")).toHaveText(
-      "[zh] Side panel sample",
+      "[zh] 翻译文本",
     );
+  } finally {
+    await context.close();
+  }
+});
+
+test("translates newly visible paragraphs after scrolling a long page", async ({
+  playwright,
+}) => {
+  const { context, worker } = await launchExtension(playwright);
+  try {
+    await selectMockService(worker, {
+      translateToPageEndImmediately: false,
+    });
+    const page = await context.newPage();
+    await page.goto(origin);
+    await page.evaluate(() => {
+      const article = document.querySelector("main article");
+      if (!article) throw new Error("Article fixture is missing.");
+      for (let index = 0; index < 120; index += 1) {
+        const paragraph = document.createElement("p");
+        paragraph.textContent = `Scroll test paragraph ${index} with enough English text for translation.`;
+        article.append(paragraph);
+      }
+    });
+    await expect.poll(() => contentState(worker)).toMatchObject({
+      ready: true,
+    });
+    expect(await runPageCommand(worker, "toggleTranslateTheWholePage")).toBe(
+      true,
+    );
+    await expect(page.locator('[data-imt="target"]').first()).toBeVisible();
+    const before = await page.locator('[data-imt="target"]').count();
+    const translatedHtmlBeforeScroll = await page
+      .locator("#first [data-imt='target']")
+      .evaluate((element) => {
+        const state = window as unknown as {
+          __imtScrollMutations: number;
+        };
+        state.__imtScrollMutations = 0;
+        new MutationObserver((records) => {
+          state.__imtScrollMutations += records.length;
+        }).observe(element, {
+          attributes: true,
+          childList: true,
+          characterData: true,
+          subtree: true,
+        });
+        return element.outerHTML;
+      });
+
+    await page.evaluate(() =>
+      scrollTo(0, document.documentElement.scrollHeight),
+    );
+    await expect
+      .poll(() => page.locator('[data-imt="target"]').count(), {
+        timeout: 5_000,
+      })
+      .toBeGreaterThan(before);
+    await expect(
+      page.locator('p', { hasText: "Scroll test paragraph 119" }).last(),
+    ).toContainText("[zh]");
+    await expect(page.locator("#first [data-imt='target']")).toHaveCount(1);
+    expect(
+      await page.locator("#first [data-imt='target']").evaluate((element) => ({
+        html: element.outerHTML,
+        mutations: (
+          window as unknown as { __imtScrollMutations: number }
+        ).__imtScrollMutations,
+      })),
+    ).toEqual({
+      html: translatedHtmlBeforeScroll,
+      mutations: 0,
+    });
+  } finally {
+    await context.close();
+  }
+});
+
+test("falls back to extension tabs in the domestic Chromium build", async ({
+  playwright,
+}) => {
+  const { context, worker } = await launchExtension(
+    playwright,
+    path.resolve("dist-chromium-compat"),
+  );
+  try {
+    await worker.evaluate(async () => {
+      const api = (globalThis as unknown as ExtensionWorkerGlobal).chrome;
+      let config: Record<string, unknown> | undefined;
+      for (let attempt = 0; attempt < 100 && !config; attempt += 1) {
+        const stored = await api.storage.local.get("config");
+        if (stored.config && typeof stored.config === "object") {
+          config = stored.config as Record<string, unknown>;
+        } else {
+          await new Promise((resolve) => setTimeout(resolve, 20));
+        }
+      }
+      if (!config) throw new Error("Extension defaults were not installed.");
+      const services = config.services as Record<string, unknown>;
+      await api.storage.local.set({
+        config: {
+          ...config,
+          service: "local-model",
+          translateMainOnly: false,
+          translationMode: "dual",
+          services: {
+            ...services,
+            "local-model": {
+              ...(services["local-model"] as Record<string, unknown>),
+              enabled: true,
+            },
+          },
+        },
+      });
+    });
+    const permissions = await worker.evaluate(() => {
+      const api = (globalThis as unknown as ExtensionWorkerGlobal).chrome;
+      return api.runtime.getManifest().permissions ?? [];
+    });
+    expect(permissions).not.toContain("offscreen");
+    expect(permissions).not.toContain("sidePanel");
+
+    const page = await context.newPage();
+    await page.goto(origin);
+    await page.locator('[data-imt="float-ball"] .ball').waitFor({
+      state: "visible",
+    });
+    await page
+      .locator('[data-imt="float-ball"] .ball')
+      .evaluate((element) => (element as HTMLElement).click());
+    await page
+      .locator('[data-imt="float-ball"] [data-action="dual"]')
+      .evaluate((element) => (element as HTMLElement).click());
+
+    await expect
+      .poll(
+        () =>
+          context
+            .pages()
+            .some((candidate) =>
+              candidate.url().includes("/src/local-model/index.html"),
+            ),
+        { timeout: 20_000 },
+      )
+      .toBe(true);
+
+    const modelPage = context
+      .pages()
+      .find((candidate) =>
+        candidate.url().includes("/src/local-model/index.html"),
+      );
+    expect(modelPage).toBeDefined();
+    const activeTabId = await worker.evaluate(
+      async () => {
+        const api = (globalThis as unknown as ExtensionWorkerGlobal).chrome;
+        return (
+          await api.tabs.query({ active: true, currentWindow: true })
+        )[0]?.id;
+      },
+    );
+    const response = await modelPage?.evaluate(async (tabId) => {
+      const api = (
+        globalThis as unknown as {
+          chrome: {
+            runtime: {
+              sendMessage(message: unknown): Promise<unknown>;
+            };
+          };
+        }
+      ).chrome;
+      return api.runtime.sendMessage({ type: "openSidePanel", tabId });
+    }, activeTabId);
+
+    expect(response).toEqual({ opened: true, fallback: "tab" });
+    await expect
+      .poll(
+        () =>
+          context
+            .pages()
+            .some((candidate) =>
+              candidate.url().includes("/src/ui/sidepanel/index.html"),
+            ),
+        { timeout: 5_000 },
+      )
+      .toBe(true);
   } finally {
     await context.close();
   }

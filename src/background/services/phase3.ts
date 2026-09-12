@@ -22,6 +22,7 @@ import { TransmartService } from "./transmart";
 import { VolcService } from "./volc";
 import { YandexFreeService } from "./yandex-free";
 import { YoudaoService } from "./youdao";
+import { YoudaoFreeService } from "./youdao-free";
 
 export function phase3Services(): TranslationService[] {
   const presets = OPENAI_PROVIDER_PRESETS.flatMap((preset) => {
@@ -38,6 +39,7 @@ export function phase3Services(): TranslationService[] {
     new TencentService(),
     new BaiduService(),
     new YoudaoService(),
+    new YoudaoFreeService(),
     new CaiyunService(),
     new AliyunService(),
     new PapagoService(),
@@ -71,6 +73,7 @@ export function createPhase3Service(
     maxBatchSize: settings.maxBatchSize,
     maxBatchChars: settings.maxBatchChars,
     rateLimit: settings.rateLimit,
+    clientKey: "browser-edge-extension",
   };
   const preset = getPreset(id) ?? getPreset(kind);
   if (preset) {
@@ -140,6 +143,8 @@ export function createPhase3Service(
         appId: settings.appId,
         secret: settings.secret,
       });
+    case "youdao-free":
+      return new YoudaoFreeService(common);
     case "caiyun":
       return new CaiyunService(common);
     case "aliyun":

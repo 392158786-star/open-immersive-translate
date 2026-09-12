@@ -9,6 +9,12 @@ export default defineConfig({
   build: {
     rollupOptions: {
       input: {
+        academic: fileURLToPath(
+          new URL("./src/academic/index.html", import.meta.url),
+        ),
+        localModel: fileURLToPath(
+          new URL("./src/local-model/index.html", import.meta.url),
+        ),
         pdf: fileURLToPath(new URL("./src/pdf/index.html", import.meta.url)),
         subtitleFile: fileURLToPath(
           new URL("./src/subtitle-file/index.html", import.meta.url),

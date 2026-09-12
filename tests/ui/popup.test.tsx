@@ -82,13 +82,16 @@ describe("Popup", () => {
     const toggle = await screen.findByRole("button", { name: "翻译" });
     await screen.findByText("example.com");
     expect((screen.getByLabelText("翻译服务") as HTMLSelectElement).value).toBe(
-      "google",
+      "youdao-free",
     );
-    expect(stored.services.google).toMatchObject({
-      kind: "google",
+    expect(stored.services.transmart).toMatchObject({
+      kind: "transmart",
       enabled: true,
     });
-    expect(stored.services.google?.apiKey).toBeUndefined();
+    expect(stored.services.google).toMatchObject({
+      kind: "google",
+      enabled: false,
+    });
     fireEvent.click(toggle);
 
     await waitFor(() =>

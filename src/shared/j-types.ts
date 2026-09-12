@@ -63,6 +63,9 @@ export interface PageTranslationStateMessage {
 
 export interface AdvancedParagraphMetadata {
   preformatted?: boolean;
+  protectedAcademicText?: string;
+  academicTerms?: string[];
+  translatedSegments?: string[];
 }
 
 export type AdvancedParagraph = Paragraph & AdvancedParagraphMetadata;

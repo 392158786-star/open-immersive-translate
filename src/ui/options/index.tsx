@@ -13,6 +13,7 @@ import { LANGUAGE_CODES } from "../../shared/lang";
 import {
   sendToBackground,
   type ChatgptOauthStatus,
+  type LocalModelStatusItem,
   type ServiceTestResult,
 } from "../../shared/messages";
 import { EXTENSION_COMMAND_IDS } from "../../background/commands";
@@ -418,6 +419,9 @@ function ServiceCard({
           {t("services.unsupportedPair", { from, to })}
         </p>
       )}
+      {serviceId === "local-model" ? (
+        <LocalModelStatusPanel service={service} />
+      ) : null}
       <div class="form-grid two-columns service-fields">
         {serviceFields(
           serviceId,
@@ -474,6 +478,90 @@ function ServiceCard({
         )}
       </div>
     </Card>
+  );
+}
+
+function LocalModelStatusPanel({
+  service,
+}: {
+  service: ServiceConfig;
+}): preact.JSX.Element {
+  const [items, setItems] = useState<LocalModelStatusItem[]>([]);
+  const [busy, setBusy] = useState<"translation" | "academic" | "all">();
+  const [error, setError] = useState("");
+
+  const refresh = async (): Promise<void> => {
+    try {
+      setItems(await sendToBackground({ type: "getLocalModelStatus" }));
+      setError("");
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : String(reason));
+    }
+  };
+
+  useEffect(() => {
+    void refresh();
+    const timer = window.setInterval(() => void refresh(), 1_000);
+    return () => window.clearInterval(timer);
+  }, [service.model, service.models?.[0]]);
+
+  const start = async (
+    target: "translation" | "academic" | "all",
+  ): Promise<void> => {
+    setBusy(target);
+    try {
+      await sendToBackground({ type: "loadLocalModel", target });
+      await refresh();
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : String(reason));
+    } finally {
+      setBusy(undefined);
+    }
+  };
+
+  return (
+    <div class="local-model-panel">
+      <div class="local-model-heading">
+        <div>
+          <strong>本地模型</strong>
+          <p>模型下载后保存在扩展缓存中，不会修改浏览器或系统环境。</p>
+        </div>
+        <div class="local-model-actions">
+          <Button disabled={Boolean(busy)} onClick={() => void start("translation")}>
+            翻译模型
+          </Button>
+          <Button disabled={Boolean(busy)} onClick={() => void start("academic")}>
+            学术模型
+          </Button>
+          <Button disabled={Boolean(busy)} onClick={() => void start("all")}>
+            全部下载
+          </Button>
+        </div>
+      </div>
+      {items.map((item) => {
+        const progress = Math.max(0, Math.min(100, item.progress * 100));
+        return (
+          <div class="local-model-row" key={item.role}>
+            <div>
+              <strong>{item.role === "translation" ? "翻译模型" : "学术模型"}</strong>
+              <span>{item.model}</span>
+            </div>
+            <div class="local-model-progress">
+              <div style={{ width: `${progress}%` }} />
+            </div>
+            <small>
+              {item.ready
+                ? "已就绪"
+                : item.status === "progress"
+                  ? `${Math.round(progress)}%${item.file ? ` · ${item.file}` : ""}`
+                  : item.status}
+            </small>
+          </div>
+        );
+      })}
+      {!items.length && !error ? <p class="ui-status">正在读取模型状态...</p> : null}
+      {error ? <p class="ui-status ui-status-error">{error}</p> : null}
+    </div>
   );
 }
 

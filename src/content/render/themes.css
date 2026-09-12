@@ -1,6 +1,6 @@
 :root,
 :host {
-  --imt-target-color: #265ea8;
+  --imt-target-color: #000000;
   --imt-target-font: inherit;
   --imt-target-font-size: inherit;
   --imt-target-line-height: inherit;
@@ -11,16 +11,59 @@
   --imt-marker-color: rgb(255 224 92 / 55%);
 }
 
+.imt-translation-scroll-lock {
+  overflow-anchor: none !important;
+}
+
 .imt-target {
   box-sizing: border-box !important;
   color: var(--imt-target-color, inherit) !important;
   font-family: var(--imt-target-font, inherit) !important;
   font-size: var(--imt-target-font-size, inherit) !important;
   line-height: var(--imt-target-line-height, inherit) !important;
+  text-orientation: mixed !important;
+  writing-mode: horizontal-tb !important;
+}
+
+.imt-target-block {
+  display: block !important;
+  width: 100% !important;
+  margin-top: 0.2em !important;
+}
+
+.imt-target.imt-target-interactive {
+  display: inline-block !important;
+  width: auto !important;
+  margin: 0 0 0 0.35em !important;
+  overflow-wrap: normal !important;
+  text-orientation: mixed !important;
+  vertical-align: baseline !important;
+  white-space: nowrap !important;
+  word-break: keep-all !important;
+  writing-mode: horizontal-tb !important;
 }
 
 .imt-source-hidden {
   display: none !important;
+}
+
+.imt-academic-term {
+  border-bottom: 1px dotted currentColor !important;
+  cursor: help !important;
+  font-size: inherit !important;
+  font-weight: 600 !important;
+  line-height: inherit !important;
+}
+
+.imt-academic-term:focus-visible {
+  outline: 2px solid #2563eb !important;
+  outline-offset: 2px !important;
+}
+
+.imt-academic-meaning {
+  color: var(--imt-muted-color) !important;
+  font-size: inherit !important;
+  line-height: inherit !important;
 }
 
 .imt-theme-none {
@@ -174,10 +217,74 @@
   white-space: pre-wrap !important;
 }
 
+.imt-target.imt-target-replace {
+  background: transparent !important;
+  border: 0 !important;
+  color: inherit !important;
+  filter: none !important;
+  font-family: inherit !important;
+  font-size: inherit !important;
+  font-style: inherit !important;
+  font-weight: inherit !important;
+  line-height: inherit !important;
+  margin: 0 !important;
+  opacity: 1 !important;
+  padding: 0 !important;
+  text-decoration: none !important;
+}
+
+.imt-target.imt-target-auto-color {
+  color: var(--imt-target-color, inherit) !important;
+}
+
+.imt-target.imt-target-replace.imt-target-block {
+  margin-top: 0 !important;
+}
+
+.imt-target-segment {
+  display: block !important;
+  margin: 0 !important;
+  padding: 0 !important;
+}
+
+.imt-target-segment + .imt-target-segment {
+  margin-top: 0.18em !important;
+}
+
+.imt-target-pair {
+  display: block !important;
+  margin: 0 !important;
+  padding: 0 !important;
+}
+
+.imt-pair-source-block,
+.imt-pair-target-block {
+  display: block !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  overflow-wrap: anywhere !important;
+}
+
+.imt-pair-source-block {
+  white-space: pre-line !important;
+}
+
+.imt-pair-target-block {
+  color: inherit !important;
+  white-space: normal !important;
+}
+
+.imt-target-pair + .imt-target-pair {
+  margin-top: 0.5em !important;
+}
+
+.imt-target.imt-target-replace .imt-pair-source-block {
+  display: none !important;
+}
+
 .imt-loading::after {
   display: inline-block;
   min-width: 1.2em;
-  animation: imt-loading-dots 1s steps(4, end) infinite;
   content: "…";
   overflow: hidden;
   vertical-align: bottom;
@@ -199,20 +306,9 @@
   padding: 0 0.2em;
 }
 
-@keyframes imt-loading-dots {
-  0% {
-    width: 0;
-  }
-
-  100% {
-    width: 1.2em;
-  }
-}
-
 @media (prefers-color-scheme: dark) {
   :root,
   :host {
-    --imt-target-color: #8fbcff;
     --imt-highlight-bg: #66591a;
     --imt-paper-bg: #292a2d;
     --imt-muted-color: #aeb6c2;

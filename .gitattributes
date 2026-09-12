@@ -1,0 +1,3 @@
+*.wasm binary
+*.onnx binary
+*.woff2 binary

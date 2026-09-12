@@ -5,12 +5,13 @@ import {
   TranslateError,
 } from "./base";
 import { LANGUAGE_MAPS } from "./language-pairs";
-import { assertPair, fetchJson, randomId, supportsPair } from "./mt-utils";
+import { assertPair, fetchJson, supportsPair } from "./mt-utils";
 
 export interface TransmartServiceOptions {
   id?: string;
   name?: string;
   baseUrl?: string;
+  clientKey?: string;
   timeoutMs?: number;
   maxBatchSize?: number;
   maxBatchChars?: number;
@@ -29,21 +30,23 @@ export class TransmartService extends BaseService {
   readonly limitation =
     "Public web endpoint; may require site-side changes without notice.";
   private readonly baseUrl: string;
+  private readonly clientKey: string;
   private readonly timeoutMs: number;
 
   constructor(options: TransmartServiceOptions = {}) {
     super({
       id: options.id ?? "transmart",
       name: options.name ?? "Transmart (limited)",
-      maxBatchSize: options.maxBatchSize ?? 20,
-      maxBatchChars: options.maxBatchChars ?? 5_000,
+      maxBatchSize: options.maxBatchSize ?? 15,
+      maxBatchChars: options.maxBatchChars ?? 2_500,
       rateLimit: {
-        rps: options.rateLimit?.rps ?? 2,
-        concurrency: options.rateLimit?.concurrency ?? 2,
+        rps: options.rateLimit?.rps ?? 16,
+        concurrency: options.rateLimit?.concurrency ?? 8,
       },
       placeholder: { open: "#", close: "#" },
     });
     this.baseUrl = options.baseUrl ?? "https://transmart.qq.com/api/imt";
+    this.clientKey = options.clientKey ?? "browser-edge-extension";
     this.timeoutMs = options.timeoutMs ?? 10_000;
   }
 
@@ -63,7 +66,11 @@ export class TransmartService extends BaseService {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          header: { fn: "auto_translation", session: randomId() },
+          header: {
+            fn: "auto_translation",
+            client_key: this.clientKey,
+            session: "",
+          },
           type: "plain",
           model_category: "normal",
           source: { lang: from, text_list: request.texts },

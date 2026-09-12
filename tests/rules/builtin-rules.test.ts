@@ -41,6 +41,7 @@ describe("builtinRules", () => {
     ["https://claude.ai/new", "ported-claude"],
     ["https://www.zhihu.com/question/1", "ported-zhihu"],
     ["https://www.bilibili.com/video/BV1", "ported-bilibili"],
+    ["https://www.chinaxiv.org/abs/202609.00031", "chinaxiv"],
   ])("selects %s as %s", (url, id) => {
     expect(matchRule(url).id).toBe(id);
   });
@@ -75,11 +76,19 @@ describe("builtinRules", () => {
     expect(byId.wikipedia.selectors).toEqual(["#mw-content-text"]);
     expect(byId.wikipedia.excludeSelectors).toContain(".references");
     expect(byId.arxiv.selectors).toContain("blockquote.abstract");
+    expect(byId.arxiv.selectors).toContain(".submission-history h2");
+    expect(byId.arxiv.selectors).toContain(".extra-services h2");
     expect(byId.medium.selectors).toEqual(["article"]);
     expect(byId["google-search"].excludeSelectors).toContain("#tads");
     expect(byId["google-search"].excludeSelectors).toContain(
       ".related-question-pair",
     );
+    expect(byId.chinaxiv.excludeSelectors).toContain(".MathJax");
+    expect(byId.chinaxiv.excludeSelectors).toContain("#MathJax_Message");
+    expect(byId.chinaxiv.excludeSelectors).toContain(".citation");
+    expect(byId.chinaxiv.enableRichTranslate).toBe(false);
+    expect(byId.chinaxiv.sameLangCheck).toBe(false);
+    expect(byId.chinaxiv.selectors).toEqual([".paper"]);
   });
 
   it("keeps the ten reviewed rules last so they override generated data", () => {

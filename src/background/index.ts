@@ -21,6 +21,12 @@ import {
 } from "../shared/messages";
 import type { Rule, ServiceConfig } from "../shared/types";
 import {
+  DEFAULT_LOCAL_ACADEMIC_MODEL,
+  DEFAULT_LOCAL_TRANSLATION_MODEL,
+} from "../shared/local-models";
+import { removeDuplicateTranslation } from "../shared/deduplicate";
+import { supportsNativeSidePanel } from "../shared/browser-capabilities";
+import {
   clearTranslationCache,
   cleanupTranslationCache,
   getTranslationCacheCount,
@@ -30,6 +36,11 @@ import {
   PageBadgeController,
   type BadgeActionApi,
 } from "./badge";
+import {
+  getAcademicKnowledge,
+  openAcademicKnowledge,
+} from "./academic";
+import { requestLocalModel } from "./local-model-host";
 import { routeExtensionCommand } from "./commands";
 import { createContextMenus, routeContextMenuClick } from "./context-menus";
 import { matchRule, validateRule } from "./rules/match";
@@ -57,12 +68,36 @@ interface NativeSidePanelApi {
   setPanelBehavior(options: { openPanelOnActionClick: boolean }): Promise<void>;
 }
 
+const SIDE_PANEL_PATH = "src/ui/sidepanel/index.html";
+
 function sidePanelApi(): NativeSidePanelApi | undefined {
   return (
     globalThis as unknown as {
       chrome?: { sidePanel?: NativeSidePanelApi };
     }
   ).chrome?.sidePanel;
+}
+
+async function openSidePanelCompat(
+  tabId?: number,
+): Promise<{ opened: true; fallback: "native" | "tab" }> {
+  const api = sidePanelApi();
+  if (
+    tabId !== undefined &&
+    api &&
+    supportsNativeSidePanel()
+  ) {
+    try {
+      await api.open({ tabId });
+      return { opened: true, fallback: "native" };
+    } catch {
+      // Some Chromium derivatives expose the API but reject it at runtime.
+    }
+  }
+  await browser.tabs.create({
+    url: browser.runtime.getURL(SIDE_PANEL_PATH),
+  });
+  return { opened: true, fallback: "tab" };
 }
 
 function actionApi(): BadgeActionApi {
@@ -159,7 +194,10 @@ async function runAssistantRequest(
         retryable: error.retryable,
       });
     }
-    return result.texts[0] ?? "";
+    const text = result.texts[0] ?? "";
+    return config.removeDuplicateTranslations
+      ? removeDuplicateTranslation(request.text, text) || text
+      : text;
   }
   if (!service.completePrompt) {
     throw new TranslateError(
@@ -250,12 +288,112 @@ browser.runtime.onMessage.addListener(
         return configuredService(request.serviceId).then(({ service }) => ({
           streaming: typeof service.onPartial === "function",
         }));
+      case "academicResolve":
+        return getAcademicKnowledge(request.term, {
+          refresh: true,
+          context: request.context,
+          title: request.title,
+          url: request.url,
+          service: request.service,
+        });
+      case "academicGet":
+        return getAcademicKnowledge(request.term);
+      case "openAcademic":
+        return openAcademicKnowledge(request.term).then((opened) => ({
+          opened,
+        }));
+      case "getLocalModelStatus": {
+        return loadConfig().then((config) => {
+          const local = config.services["local-model"];
+          const models = [
+            {
+              role: "translation" as const,
+              model: local?.model ?? DEFAULT_LOCAL_TRANSLATION_MODEL,
+            },
+            {
+              role: "academic" as const,
+              model:
+                local?.models?.[0] ??
+                DEFAULT_LOCAL_ACADEMIC_MODEL,
+            },
+          ];
+          return Promise.all(
+            models.map(async ({ role, model }) => {
+              try {
+                const response = await requestLocalModel<{
+                  ready?: boolean;
+                  status?: {
+                    status?: string;
+                    progress?: number;
+                    loaded?: number;
+                    total?: number;
+                    file?: string;
+                  };
+                  error?: string;
+                }>({
+                  action: "status",
+                  model,
+                  device: local?.localDevice ?? "auto",
+                  dtype: local?.localDtype ?? "q4",
+                });
+                return {
+                  role,
+                  model,
+                  ready: response.ready === true,
+                  status: response.error ?? response.status?.status ?? "idle",
+                  progress: response.status?.progress ?? 0,
+                  loaded: response.status?.loaded ?? 0,
+                  total: response.status?.total ?? 0,
+                  file: response.status?.file,
+                };
+              } catch (error) {
+                return {
+                  role,
+                  model,
+                  ready: false,
+                  status:
+                    error instanceof Error ? error.message : String(error),
+                  progress: 0,
+                  loaded: 0,
+                  total: 0,
+                };
+              }
+            }),
+          );
+        });
+      }
+      case "loadLocalModel": {
+        return loadConfig().then((config) => {
+          const local = config.services["local-model"];
+          const translationModel =
+            local?.model ?? DEFAULT_LOCAL_TRANSLATION_MODEL;
+          const academicModel =
+            local?.models?.[0] ??
+            DEFAULT_LOCAL_ACADEMIC_MODEL;
+          const common = {
+            action: "load",
+            device: local?.localDevice ?? "auto",
+            dtype: local?.localDtype ?? "q4",
+          };
+          if (request.target === "translation" || request.target === "all") {
+            void requestLocalModel({
+              ...common,
+              target: "translation",
+              model: translationModel,
+            }).catch(() => undefined);
+          }
+          if (request.target === "academic" || request.target === "all") {
+            void requestLocalModel({
+              ...common,
+              target: "academic",
+              model: academicModel,
+            }).catch(() => undefined);
+          }
+          return { started: true };
+        });
+      }
       case "openSidePanel": {
-        const api = sidePanelApi();
-        if (!api) return Promise.resolve({ opened: false });
-        return api
-          .open({ tabId: request.tabId })
-          .then(() => ({ opened: true }));
+        return openSidePanelCompat(request.tabId);
       }
       default:
         return undefined;
@@ -315,25 +453,30 @@ browser.runtime.onConnect.addListener((port) => {
     const controller = new AbortController();
     controllers.set(requestId, controller);
     void configuredService(request.service)
-      .then(async ({ service }) => {
+      .then(async ({ service, config }) => {
+        const clean = (text: string): string =>
+          request.kind === "translate" &&
+          config.removeDuplicateTranslations
+            ? removeDuplicateTranslation(request.text, text) || text
+            : text;
         const emit = (text: string): void => {
           if (!disconnected) {
             port.postMessage({
               type: "assistantPartial",
               requestId,
-              text,
+              text: clean(text),
               done: false,
             });
           }
         };
-        const text = service.onPartial
+        const rawText = service.onPartial
           ? await service.onPartial(request, emit, controller.signal)
           : await runAssistantRequest(request, controller.signal);
         if (!disconnected) {
           port.postMessage({
             type: "assistantPartial",
             requestId,
-            text,
+            text: clean(rawText),
             done: true,
           });
         }
@@ -387,7 +530,7 @@ browser.commands.onCommand.addListener((command) => {
       await browser.tabs.sendMessage(tabId, message, { frameId: 0 });
     },
     async openSidePanel(tabId) {
-      await sidePanelApi()?.open({ tabId });
+      await openSidePanelCompat(tabId);
     },
   }).catch(() => undefined);
 });
@@ -403,12 +546,12 @@ browser.contextMenus.onClicked.addListener((info, tab) => {
       await browser.tabs.create({ url: browser.runtime.getURL(path) });
     },
     async openSidePanel(tabId) {
-      await sidePanelApi()?.open({ tabId });
+      await openSidePanelCompat(tabId);
     },
   }).catch(() => undefined);
 });
 
-browser.runtime.onInstalled.addListener(() => {
+browser.runtime.onInstalled.addListener((details) => {
   void (async () => {
     const stored = await browser.storage.local.get(CONFIG_STORAGE_KEY);
     if (stored[CONFIG_STORAGE_KEY] === undefined) {
@@ -419,10 +562,13 @@ browser.runtime.onInstalled.addListener(() => {
       });
     }
     const config = await loadConfig();
+    if (details.reason === "update") await clearTranslationCache();
     await cleanupTranslationCache(config.cache.maxAgeDays);
-    await sidePanelApi()?.setPanelBehavior({
-      openPanelOnActionClick: false,
-    });
+    if (supportsNativeSidePanel()) {
+      await sidePanelApi()?.setPanelBehavior({
+        openPanelOnActionClick: false,
+      });
+    }
     await createContextMenus(
       browser.contextMenus as unknown as Parameters<
         typeof createContextMenus

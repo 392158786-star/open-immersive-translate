@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: ["main"]
+    branches: ["main", "competition/huawei-codearts"]
   pull_request:
 
 jobs:
@@ -22,3 +22,36 @@ jobs:
       - run: pnpm lint
       - run: pnpm test
       - run: pnpm build
+      - run: pnpm build:web-demo
+
+  web-demo-e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.33.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build:web-demo
+      - run: pnpm exec playwright install --with-deps chromium
+      - run: pnpm test:e2e:web-demo
+
+  cloud-demo:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: cloud-demo
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: cloud-demo/package-lock.json
+      - run: npm ci
+      - run: npm run verify
+      - run: npm run preflight

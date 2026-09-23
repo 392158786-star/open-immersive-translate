@@ -17,13 +17,15 @@
 | E10 | 可视化 Demo 可通过公网访问 | `evidence/10-public-demo.png` | 待完成 | 待完成 |
 | E11 | 健康检查全部通过 | `evidence/11-health-check.png` | 待完成 | 待完成 |
 | E12 | Redis 未命中、RDS 写入、再次命中 | `evidence/12-cache-flow.png` | 待完成 | 待完成 |
-| E13 | 测试、Lint、类型检查和构建通过 | `evidence/13-validation.png` | 2026-09-23 | `2b8475e` `982d1f2` `6e375fa` `6a1caae` `e16626f` `ed47f4e` `c3f4f38` `53ff407` `85a7488` `47855c3` `694cfc4` `abef303` `f37e375` `1573ff9` 截图待补 |
+| E13 | 测试、Lint、类型检查和构建通过 | `evidence/13-validation.png` | 2026-09-23 | `2b8475e` `982d1f2` `6e375fa` `6a1caae` `e16626f` `ed47f4e` `c3f4f38` `53ff407` `85a7488` `47855c3` `694cfc4` `abef303` `f37e375` `1573ff9` `d94de1b` `6457088` `222983f` `da88318` `e21d6dd` 截图待补 |
 | E14 | 三分钟演示视频 | 待完成 | 待完成 | 待完成 |
 | E15 | 最终版本和 Tag | 待完成 | 待完成 | 待完成 |
 | E16 | 网站翻译 Demo 逐段渲染译文并展示缓存层/延迟/服务/回退 | `evidence/16-web-demo-translation.png` | 2026-09-23 | `694cfc4` `f37e375` |
 | E17 | Demo「仅中文」模式：替换原文并隐藏源文本 | `evidence/17-web-demo-zh-only.png` | 2026-09-23 | `694cfc4` `f37e375` |
 | E18 | 云端 API 不可用时逐段回退本地 Mock（回退=是） | `evidence/18-web-demo-fallback.png` | 2026-09-23 | `694cfc4` `f37e375` |
 | E19 | Demo 移动端布局无横向溢出，元数据表格容器内滚动 | `evidence/19-web-demo-mobile.png` | 2026-09-23 | `f37e375` |
+| E20 | 端到端回归与云端自检可自动化执行 | `tests/e2e/web-demo.spec.ts`（6 条用例）、`cloud-demo/scripts/preflight.ts`、`.github/workflows/ci.yml` | 2026-09-23 | `d94de1b` `6457088` `222983f` |
+| E21 | 一键部署脚本与公网路由（网站翻译 Demo + 云端工作台） | `deploy/deploy-ecs.sh`、`deploy/nginx.conf`、`docs/competition/03-deployment-guide.md` | 2026-09-23 | `da88318` `e21d6dd` |
 
 ## 记录规则
 

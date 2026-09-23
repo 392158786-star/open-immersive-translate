@@ -1,6 +1,6 @@
 # 实施日志
 
-记录 P1–P7、运行时修复、部署修复与命令稳定性各阶段的目标、产出、验证与提交号。
+记录 P1–P7、运行时修复、部署修复、命令稳定性以及 P8 云端部署前置各阶段的目标、产出、验证与提交号。
 
 ## P1 — 项目隔离与配置基线
 
@@ -78,3 +78,24 @@
 - **产出**：更新 `AGENTS.md` 与 `cloud-demo/AGENTS.md`，限定单条原生命令、禁用管道/重定向/shell 包装/npm 脚本。
 - **验证**：无代码变更，文档提交。
 - **提交**：`32cad8c`、`da37a92`
+
+## P8 前置 — 网站翻译完整融合到云端 Demo
+
+- **目标**：把浏览器扩展的网站翻译能力（正文抽取、渲染注入、模式切换、术语标注、动态内容、云端调用与回退）完整搬进可在云上托管的 Demo 页面，而不是另写一套简化算法。
+- **产出**：`src/web-demo/page-translator.ts`（直接复用 `extractParagraphs`、`findMainContent`、`detectTextLanguage`、`decode`、`renderTranslation`、`setMode`、`removeAll`、`injectStyles`、`observeMutations` 与学术术语模块）、`src/web-demo/index.tsx`（真实文章 DOM + 原文/双语/仅中文 + 逐段元数据表）、`src/web-demo/translator.ts`、`vite.web-demo.config.ts`、`tests/web-demo/*`、`docs/competition/07-web-demo-capabilities.md`。
+- **验证**：根项目 typecheck / ESLint / Vitest（89 文件 518 测试）/ Vite build / `pnpm build:web-demo` 全通过；cloud-demo 直接 Node 入口 typecheck、ESLint、Vitest（65 测试）通过；浏览器实测 7→8 段落、三种模式、回退与移动端布局。
+- **提交**：`694cfc4`（融合）、`abef303`（健康检查增加上游探针）、`f37e375`（语言采样范围、字幕序列化、构建产物忽略、移动端表格）、`1573ff9`（构建与真实模型接入文档）、`195b04c`（E16–E19 证据截图）
+
+## P8 前置 — 稳定性与可验证性加固
+
+- **目标**：让云端对接阶段可以"一键验证、一键部署"，任何改动都能立刻确认是否破坏功能。
+- **产出**：`tests/e2e/web-demo.spec.ts` + `playwright.web-demo.config.ts`（6 条端到端用例：渲染与元数据、三模式与 DOM 还原、云端不可达回退、动态段落、移动端无横向溢出、`?api=` 地址注入）；`cloud-demo/scripts/preflight.ts`（RDS/Redis/上游逐项自检，FAIL 时退出码 1）；根 `pnpm verify` 与 cloud-demo `npm run verify`；`cloud-demo/src/services/cache.ts` 增加连接超时、重试上限与错误监听，消除 ioredis 断连刷屏。
+- **验证**：`pnpm verify` 全通过；`pnpm test:e2e:web-demo` 6/6 通过；cloud-demo `npm run verify` 65 测试通过；preflight 在未配置时 5 项 WARN、退出码 0，在故意填错地址时 3 项 FAIL、退出码 1。
+- **提交**：`d94de1b`、`6457088`、`222983f`
+
+## P8 前置 — 一键部署与公网路由
+
+- **目标**：ECS 上一条命令完成部署；公网同时提供网站翻译 Demo 与云端工作台。
+- **产出**：`deploy/deploy-ecs.sh`（拉代码→检查 `.env`→preflight→`docker compose -f docker-compose.huawei.yml up -d --build`→轮询 `/health` 四项 up→输出访问地址与日志命令，并记录实际部署的提交号）；`deploy/nginx.conf`（`/` 静态托管 `dist-web-demo`，`/workbench/` 反代到 Fastify 工作台，`/v1/`、`/health` 反代 API）；`src/web-demo/config.ts`（`?api=` > `VITE_CLOUD_API_BASE` > 默认值）；部署文档与演示脚本更新。
+- **验证**：`bash -n deploy/deploy-ecs.sh` 通过；实跑脚本在缺少 `.env` 时给出明确提示并以退出码 1 停止，离线时打印警告并记录当前部署提交；`pnpm verify`、`pnpm test:e2e:web-demo`（6 条含 `?api=`）、cloud-demo `npm run verify`、`npm run preflight` 全通过。
+- **提交**：`da88318`、`e21d6dd`

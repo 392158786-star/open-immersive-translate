@@ -15,9 +15,11 @@ log "=== 一键部署开始 ==="
 # 1. 拉取最新代码
 log "拉取 $BRANCH 分支..."
 cd "$REPO_DIR"
-git fetch origin "$BRANCH" 2>/dev/null || log "fetch 跳过（无远端或离线）"
-git checkout "$BRANCH" 2>/dev/null || true
-git pull origin "$BRANCH" 2>/dev/null || log "pull 跳过（无远端或离线）"
+git fetch origin "$BRANCH" 2>/dev/null || log "警告：fetch 失败（离线或权限不足），使用本地已有对象"
+git checkout "$BRANCH" 2>/dev/null || log "警告：checkout 未切换，继续使用当前分支"
+git pull --ff-only origin "$BRANCH" 2>/dev/null || log "警告：pull 未成功，将使用本地当前版本"
+# 记录本次实际部署的提交，便于赛后追溯与回滚
+log "部署版本：$(git rev-parse --short HEAD) $(git log -1 --pretty=%s)"
 
 # 2. 进入 cloud-demo
 cd "$CLOUD_DIR"

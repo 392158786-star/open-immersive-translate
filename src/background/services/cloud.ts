@@ -40,8 +40,9 @@ export class CloudService extends BaseService {
     super({
       id: options.id ?? "cloud",
       name: options.name ?? "Cloud",
-      maxBatchSize: options.maxBatchSize ?? 1,
-      maxBatchChars: options.maxBatchChars ?? 5_000,
+      // 云端支持一次提交多段（批量接口），这也是它比免费公共接口快的主要原因。
+      maxBatchSize: options.maxBatchSize ?? 20,
+      maxBatchChars: options.maxBatchChars ?? 4_000,
       rateLimit: {
         rps: options.rateLimit?.rps ?? 5,
         concurrency: options.rateLimit?.concurrency ?? 4,
@@ -72,6 +73,49 @@ export class CloudService extends BaseService {
     };
     if (this.apiKey) {
       authHeaders.Authorization = `Bearer ${this.apiKey}`;
+    }
+
+    // 多段时走一次批量请求：云端再分别查 Redis/RDS 并对未命中段做一次模型调用。
+    if (request.texts.length > 1) {
+      const response = await fetchWithTimeout(
+        url,
+        {
+          method: "POST",
+          headers: authHeaders,
+          body: JSON.stringify({
+            texts: [...request.texts],
+            from: request.from,
+            to: request.to,
+          }),
+        },
+        signal,
+        this.timeoutMs,
+        this.id,
+      );
+      if (!response.ok) throw await responseError(response, this.id);
+      const data = (await parseJsonResponse(response, this.id)) as {
+        translations?: unknown;
+        results?: unknown;
+      };
+      const batchTexts = Array.isArray(data.translations)
+        ? data.translations
+        : Array.isArray(data.results)
+          ? (data.results as Array<{ targetText?: unknown }>).map(
+              (item) => item?.targetText,
+            )
+          : undefined;
+      if (
+        !batchTexts ||
+        batchTexts.length !== request.texts.length ||
+        batchTexts.some((text) => typeof text !== "string")
+      ) {
+        throw new TranslateError(
+          "parse",
+          "Cloud batch response item count does not match the request.",
+          { serviceId: this.id, retryable: false },
+        );
+      }
+      return { texts: batchTexts as string[] };
     }
 
     const results = await mapWithConcurrency(

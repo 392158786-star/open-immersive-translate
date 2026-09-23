@@ -139,7 +139,7 @@ describe("service factories", () => {
   it("creates a CloudService with config", () => {
     const service = createCloudService(config);
     expect(service.id).toBe("cloud");
-    expect(service.maxBatchSize).toBe(1);
+    expect(service.maxBatchSize).toBe(20);
   });
 
   it("creates a MockService as fallback", () => {

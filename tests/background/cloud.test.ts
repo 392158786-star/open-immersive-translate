@@ -46,11 +46,15 @@ describe("CloudService", () => {
     });
   });
 
-  it("translates multiple texts concurrently", async () => {
-    const fetchMock = vi.fn().mockImplementation(async (url: string, init: RequestInit) => {
-      const body = JSON.parse(init.body as string) as { text: string };
+  it("sends one batched request for multiple texts", async () => {
+    const fetchMock = vi.fn().mockImplementation(async (_url: string, init: RequestInit) => {
+      const body = JSON.parse(init.body as string) as { texts: string[] };
       return new Response(
-        JSON.stringify({ targetText: `[zh] ${body.text}` }),
+        JSON.stringify({
+          results: body.texts.map((text) => ({
+            targetText: `[zh] ${text}`,
+          })),
+        }),
         { status: 200, headers: { "Content-Type": "application/json" } },
       );
     });
@@ -65,7 +69,37 @@ describe("CloudService", () => {
       new AbortController().signal,
     );
     expect(result.texts).toEqual(["[zh] a", "[zh] b", "[zh] c"]);
-    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(
+      JSON.parse(fetchMock.mock.calls[0]?.[1]?.body as string),
+    ).toEqual({
+      texts: ["a", "b", "c"],
+      from: "en",
+      to: "zh-CN",
+    });
+  });
+
+  it("throws a parse error when batch response count does not match", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          results: [{ targetText: "[zh] a" }],
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const service = new CloudService({
+      baseUrl: "https://cloud.example",
+      apiKey: "tok",
+    });
+
+    await expect(
+      service.translate(
+        { texts: ["a", "b"], from: "en", to: "zh-CN" },
+        new AbortController().signal,
+      ),
+    ).rejects.toMatchObject({ code: "BAD_RESPONSE" });
   });
 
   it("throws invalid_config when baseUrl is missing", async () => {

@@ -71,7 +71,8 @@ docker compose -f docker-compose.huawei.yml up -d
 docker compose -f docker-compose.huawei.yml ps    # 确认 app 容器为 healthy
 ```
 
-Nginx 反向代理配置参见 `deploy/nginx.conf`，将 80 端口流量转发到 8787。
+Nginx 反向代理配置参见 `deploy/nginx.conf`：`/health`、`/v1/` 与 `/workbench/` 转发到 8787，
+`/` 提供 `dist-web-demo/` 静态站点（需先把构建产物放到 `/opt/dist-web-demo/`）。
 
 ```bash
 # 在项目根目录执行（cloud-demo 的上一级）

@@ -60,6 +60,19 @@ Demo 页面支持三种方式配置云端 API 地址，优先级从高到低：
 
 页面上的「API 地址」输入框始终可手动修改。Nginx 配置将 `/v1/` 和 `/health` 反代到同域，因此部署后 Demo 无需额外配置即可访问同域 API。
 
+### 公网访问路径
+
+同一台 ECS、同一个 80 端口下提供两个页面：
+
+| 路径 | 内容 | 说明 |
+|------|------|------|
+| `/` | 网站翻译 Demo（`dist-web-demo/` 静态站点） | 比赛主展示页：正文抽取、原文/双语/仅中文、逐段缓存层与延迟 |
+| `/workbench/` | 云端翻译可视化工作台（Fastify 内置页面） | 展示 RDS/Redis 命中、调用记录与健康状态 |
+| `/health` | 健康检查 | 无需令牌，返回 api/rds/redis/upstream 四项状态 |
+| `/v1/*` | 翻译与统计接口 | 需要 `Authorization: Bearer <API_TOKEN>` |
+
+部署静态站点：把 `pnpm build:web-demo` 产出的 `dist-web-demo/` 内容放到 `/opt/dist-web-demo/`（与 `deploy/nginx.conf` 中的 `root` 一致）。
+
 ## 推荐部署方式
 
 ### 方式一：ECS + Docker Compose

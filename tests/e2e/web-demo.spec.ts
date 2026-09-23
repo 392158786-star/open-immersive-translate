@@ -104,3 +104,31 @@ test("移动端布局无横向溢出", async ({ page }) => {
   const scroller = page.locator(".table-scroll");
   await expect(scroller).toBeVisible();
 });
+
+test("?api= 参数决定云端地址并真正用于请求", async ({ page }) => {
+  const customOrigin = "http://127.0.0.1:9999";
+  let hits = 0;
+  await page.route(`${customOrigin}/v1/translate`, async (route) => {
+    hits += 1;
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        requestId: "e2e-custom-origin",
+        sourceText: "",
+        targetText: "自定义地址译文",
+        cacheLayer: "rds",
+        latencyMs: 11,
+      }),
+    });
+  });
+
+  await page.goto(`/?api=${encodeURIComponent(customOrigin)}`);
+  await expect(page.locator(".config-row input[type='text']")).toHaveValue(customOrigin);
+  await translatePage(page);
+
+  expect(hits).toBeGreaterThan(0);
+  await expect(page.locator(".meta-table tbody tr").first().locator("td").nth(2)).toHaveText(
+    "rds",
+  );
+});

@@ -22,7 +22,6 @@ import {
   observeDynamicContent,
   injectPageStyles,
   clearPageTranslations,
-  isParagraphTranslated,
   scanPage,
   type PageTranslationMode,
   type PageTranslationReport,

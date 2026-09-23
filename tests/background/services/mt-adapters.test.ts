@@ -161,6 +161,97 @@ describe("official machine translation adapters", () => {
     expect(result.texts).toEqual(["First paragraph.", "Second paragraph."]);
   });
 
+  it("(a) batches 3 segments into one request and splits by marker", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      json({
+        errorCode: "0",
+        translation: [
+          "第一段。\n[[[IMT_SEGMENT]]]\n第二段。\n[[[IMT_SEGMENT]]]\n第三段。",
+        ],
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await new YoudaoFreeService().translate({
+      texts: ["First.", "Second.", "Third."],
+      from: "en",
+      to: "zh-CN",
+    }, signal());
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const body = (fetchMock.mock.calls[0][1] as RequestInit).body as URLSearchParams;
+    expect(body.get("q")).toBe(
+      "First.\n[[[IMT_SEGMENT]]]\nSecond.\n[[[IMT_SEGMENT]]]\nThird.",
+    );
+    expect(result.texts).toEqual(["第一段。", "第二段。", "第三段。"]);
+  });
+
+  it("(b) throws parse error when upstream returns fewer segments than requested", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      json({
+        errorCode: "0",
+        translation: [
+          "只有一段。\n[[[IMT_SEGMENT]]]\n第二段。",
+        ],
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      new YoudaoFreeService().translate({
+        texts: ["First.", "Second.", "Third."],
+        from: "en",
+        to: "zh-CN",
+      }, signal()),
+    ).rejects.toMatchObject({
+      kind: "parse",
+      code: "BAD_RESPONSE",
+      retryable: false,
+    });
+  });
+
+  it("(c) throws parse error when placeholder is missing in translation", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      json({
+        errorCode: "0",
+        translation: ["译文丢失了占位符"],
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      new YoudaoFreeService().translate({
+        texts: ["Source with {0} placeholder"],
+        from: "en",
+        to: "zh-CN",
+      }, signal()),
+    ).rejects.toMatchObject({
+      kind: "parse",
+      code: "BAD_RESPONSE",
+    });
+  });
+
+  it("(d) single segment path is unchanged with batch defaults", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      json({
+        errorCode: "0",
+        translation: ["单段翻译结果"],
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await new YoudaoFreeService().translate({
+      texts: ["single source"],
+      from: "en",
+      to: "zh-CN",
+    }, signal());
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const body = (fetchMock.mock.calls[0][1] as RequestInit).body as URLSearchParams;
+    expect(body.get("q")).toBe("single source");
+    expect(result.texts).toEqual(["单段翻译结果"]);
+  });
+
   it("maps Youdao 411 to rate_limit with retryable=true", async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       json({
@@ -188,6 +279,8 @@ describe("official machine translation adapters", () => {
     const service = new YoudaoFreeService();
     expect(service.rateLimit.rps).toBe(3);
     expect(service.rateLimit.concurrency).toBe(1);
+    expect(service.maxBatchSize).toBe(8);
+    expect(service.maxBatchChars).toBe(800);
     expect(service.limited).toBe(true);
     expect(service.limitation).toContain("frequency");
   });

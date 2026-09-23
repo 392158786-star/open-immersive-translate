@@ -60,8 +60,8 @@ export class YoudaoFreeService extends BaseService {
     super({
       id: options.id ?? "youdao-free",
       name: options.name ?? "Youdao Free",
-      maxBatchSize: options.maxBatchSize ?? 1,
-      maxBatchChars: options.maxBatchChars ?? 700,
+      maxBatchSize: options.maxBatchSize ?? 8,
+      maxBatchChars: options.maxBatchChars ?? 800,
       rateLimit: {
         rps: options.rateLimit?.rps ?? 3,
         concurrency: options.rateLimit?.concurrency ?? 1,

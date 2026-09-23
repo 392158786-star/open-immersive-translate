@@ -4,12 +4,14 @@ import tseslint from "typescript-eslint";
 export default tseslint.config(
   {
     ignores: [
+      ".codeartsdoer/**",
       "dist/**",
       "dist-chromium-compat/**",
       "dist-chromium-mv2/**",
       "dist-firefox/**",
       "dist-safari/**",
       "dist-userscript/**",
+      "dist-web-demo/**",
       "node_modules/**",
       "public/**",
       ".vite/**",

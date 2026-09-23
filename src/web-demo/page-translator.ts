@@ -1,6 +1,9 @@
 import type { Paragraph, Rule, LangCode, TranslationMode } from "../shared/types";
 import { extractParagraphs } from "../content/extract/scanner";
-import { detectPageLanguage } from "../content/extract/language";
+import {
+  detectPageLanguage,
+  detectTextLanguage,
+} from "../content/extract/language";
 import { findMainContent } from "../content/extract/main-area";
 import { decode } from "../content/extract/placeholder";
 import {
@@ -79,7 +82,15 @@ export function scanPage(root: Document | Element, rule?: Rule): {
   const scanRoot = mainArea ?? (root instanceof Document ? root.body ?? root.documentElement : root);
   const paragraphs = extractParagraphs(scanRoot, effectiveRule);
   const doc = root instanceof Document ? root : root.ownerDocument;
-  const pageLanguage = doc ? detectPageLanguage(doc) : "en";
+  // Sample the translated scope instead of the whole window: a demo page can
+  // host Chinese chrome around an English article, which would otherwise make
+  // the source language look identical to the target language.
+  const sampleText = (scanRoot.textContent ?? "")
+    .replace(/\s+/g, " ")
+    .slice(0, 4000);
+  const detected = detectTextLanguage(sampleText);
+  const pageLanguage =
+    detected === "auto" && doc ? detectPageLanguage(doc) : detected;
   return { mainArea, paragraphs, pageLanguage };
 }
 
@@ -100,7 +111,6 @@ export async function translateParagraph(
   const output = await translateText(protectedText, from, to, config, signal);
   const restoredText = restoreAcademicTerms(output.text, terms);
 
-  const doc = paragraph.container.ownerDocument;
   const fragment = decode(restoredText, paragraph.placeholders, PLACEHOLDER_STYLE);
 
   const renderOpts = buildRenderOptions(mode, theme, terms);
@@ -121,7 +131,7 @@ export async function translatePage(
   from: LangCode,
   to: LangCode,
   config: CloudDemoConfig,
-  mode: TranslationMode,
+  mode: PageTranslationMode,
   theme = "none",
   rule?: Rule,
   signal?: AbortSignal,

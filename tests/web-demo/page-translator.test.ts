@@ -69,6 +69,22 @@ describe("scanPage", () => {
     const { paragraphs } = scanPage(article);
     expect(paragraphs.length).toBeGreaterThan(0);
   });
+
+  it("samples the scoped article instead of the surrounding Chinese page", () => {
+    const doc = document.implementation.createHTMLDocument("混合语言页面");
+    doc.body.innerHTML = `
+      <header><p>这是演示页面的中文界面说明文字，用于模拟宿主页面语言。</p></header>
+      <div id="host">
+        <article>
+          <p>Artificial intelligence is transforming how we interact with technology and translate documents.</p>
+          <p>Machine learning models require significant computational resources for training.</p>
+        </article>
+      </div>
+    `;
+    const host = doc.querySelector("#host")!;
+    const { pageLanguage } = scanPage(host);
+    expect(pageLanguage).toBe("en");
+  });
 });
 
 describe("translatePage", () => {

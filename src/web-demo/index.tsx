@@ -1,4 +1,4 @@
-import { render, type FunctionComponent } from "preact";
+import { render, type ComponentChildren, type FunctionComponent } from "preact";
 import { useState, useCallback, useRef, useEffect } from "preact/hooks";
 import {
   translateText,
@@ -6,8 +6,6 @@ import {
   detectTerms,
   segmentText,
   deduplicateTranslation,
-  parseSubtitleContent,
-  serializeSubtitle,
   translateSubtitle,
   checkHealth,
   getStats,
@@ -24,7 +22,6 @@ import {
   observeDynamicContent,
   injectPageStyles,
   clearPageTranslations,
-  isParagraphTranslated,
   scanPage,
   type PageTranslationMode,
   type PageTranslationReport,
@@ -61,7 +58,7 @@ Machine learning models require significant computational resources for training
 
 interface SectionProps {
   title: string;
-  children: preact.JSX.Element;
+  children: ComponentChildren;
 }
 
 const Section: FunctionComponent<SectionProps> = ({ title, children }) => (
@@ -125,7 +122,8 @@ function App(): preact.JSX.Element {
     try {
       const doc = document;
       injectPageStyles(doc);
-      const translationMode = pageMode === "original" ? "dual" : (pageMode as "dual" | "translation");
+      const translationMode = pageMode === "original" ? "dual" : pageMode;
+      if (pageMode === "original") setPageMode("dual");
       const report = await translatePage(
         articleRef.current,
         fromLang,
@@ -135,7 +133,7 @@ function App(): preact.JSX.Element {
         "none",
       );
       setPageReport(report);
-    } catch (err) {
+    } catch {
       setPageReport({
         pageLanguage: "auto",
         mainContentSelector: "",
@@ -319,24 +317,26 @@ function App(): preact.JSX.Element {
             <div>页面语言: {pageReport.pageLanguage} | 主区域: {pageReport.mainContentSelector} | 段落数: {pageReport.paragraphCount}</div>
             <div>总延迟: {pageReport.totalLatencyMs}ms | 缓存层: {pageReport.cacheLayers.join(", ") || "无"} | 回退次数: {pageReport.fallbackCount}</div>
             {pageReport.results.length > 0 && (
-              <table class="meta-table">
-                <thead>
-                  <tr><th>#</th><th>源文本</th><th>缓存层</th><th>延迟</th><th>服务</th><th>回退</th><th>术语</th></tr>
-                </thead>
-                <tbody>
-                  {pageReport.results.map((r, i) => (
-                    <tr key={r.paragraphId}>
-                      <td>{i + 1}</td>
-                      <td class="src-cell">{r.sourceText.substring(0, 60)}{r.sourceText.length > 60 ? "…" : ""}</td>
-                      <td>{r.meta.cacheLayer}</td>
-                      <td>{r.meta.latencyMs}ms</td>
-                      <td>{r.meta.serviceUsed}</td>
-                      <td>{r.meta.fallbackUsed ? "是" : "否"}</td>
-                      <td>{r.terms.length > 0 ? r.terms.join(", ") : "—"}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+              <div class="table-scroll">
+                <table class="meta-table">
+                  <thead>
+                    <tr><th>#</th><th>源文本</th><th>缓存层</th><th>延迟</th><th>服务</th><th>回退</th><th>术语</th></tr>
+                  </thead>
+                  <tbody>
+                    {pageReport.results.map((r, i) => (
+                      <tr key={r.paragraphId}>
+                        <td>{i + 1}</td>
+                        <td class="src-cell">{r.sourceText.substring(0, 60)}{r.sourceText.length > 60 ? "…" : ""}</td>
+                        <td>{r.meta.cacheLayer}</td>
+                        <td>{r.meta.latencyMs}ms</td>
+                        <td>{r.meta.serviceUsed}</td>
+                        <td>{r.meta.fallbackUsed ? "是" : "否"}</td>
+                        <td>{r.terms.length > 0 ? r.terms.join(", ") : "—"}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             )}
           </div>
         )}
@@ -383,6 +383,12 @@ function App(): preact.JSX.Element {
             <div>API: {health.checks.api.status}</div>
             <div>RDS: {health.checks.rds.status} {health.checks.rds.latencyMs !== undefined ? `(${health.checks.rds.latencyMs}ms)` : ""}</div>
             <div>Redis: {health.checks.redis.status} {health.checks.redis.latencyMs !== undefined ? `(${health.checks.redis.latencyMs}ms)` : ""}</div>
+            {health.checks.upstream && (
+              <div>
+                上游模型: {health.checks.upstream.status}
+                {health.checks.upstream.detail ? ` — ${health.checks.upstream.detail}` : ""}
+              </div>
+            )}
           </div>
         )}
         {stats && (

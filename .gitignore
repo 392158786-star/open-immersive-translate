@@ -6,6 +6,7 @@ dist-chromium-mv2/
 dist-firefox/
 dist-safari/
 dist-userscript/
+dist-web-demo/
 .vite/
 playwright-report/
 test-results/

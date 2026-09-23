@@ -41,7 +41,7 @@
 | 缓存层展示 | API 响应 `cacheLayer` | 显示 redis/rds/upstream/disabled |
 | 延迟展示 | API 响应 `latencyMs` | 毫秒级延迟 |
 | 回退机制 | `translateText()` catch → `MockService` | 云端不可用时自动回退，显示 fallbackUsed |
-| 健康检查 | `checkHealth()` → `GET /health` | RDS/Redis 探针状态 |
+| 健康检查 | `checkHealth()` → `GET /health` | RDS/Redis/上游模型探针状态，可区分占位上游与真实模型 |
 | 缓存统计 | `getStats()` → `GET /v1/stats` | Redis/RDS 命中数、上游调用数 |
 | 语言检测 | `detectLanguage()` → `detectLang()` | 复用扩展语言检测引擎 |
 | 文本分段 | `segmentText()` → `splitTranslationText()` | 按句切分 |
@@ -92,3 +92,23 @@ dist-web-demo/
 3. **优雅降级**：云端不可用时自动回退 MockService，不中断翻译
 4. **元数据透传**：直接 fetch `/v1/translate` 获取 cacheLayer/latencyMs 用于展示
 5. **DOM 原生**：网页翻译流程完全复用扩展的 `extractParagraphs` + `renderTranslation` + `observeMutations`，不使用替代算法
+
+## 复核与修正（2026-09-23）
+
+提交 `694cfc4` 之后做了独立复核，修正以下问题并复测：
+
+| 问题 | 修正 |
+|------|------|
+| Demo 页面语言检测采样了整个窗口，中文界面导致源语言被识别为 `zh-CN`（与目标语言相同，译文直接回退） | `scanPage()` 改为对**翻译范围内的正文**采样（`detectTextLanguage`），仅在采样不足时回退到 `detectPageLanguage` |
+| `serializeSubtitle()` 缺少 `SubtitleExportMode` 参数，译文写入 `text` 导致双语/纯译文导出语义混淆 | 增加 `mode` 参数（默认 `translation-only`），字幕改为写入 `translation` 字段，并透传真实 cacheLayer/latencyMs/fallbackUsed |
+| `translatePage()` 参数类型为 `TranslationMode`，但内部比较 `"original"` | 参数改为 `PageTranslationMode`，原文模式语义清晰 |
+| 构建产物 `dist-web-demo/` 被 ESLint 扫描（655 条无意义报错），且未加入忽略 | `.gitignore` 与 `eslint.config.js` 增加 `dist-web-demo/**`；同时忽略 CodeArts 自身的 `.codeartsdoer/**` |
+| 元数据表格在 390px 宽度下撑破页面（横向溢出 129px） | 表格包一层 `.table-scroll`，容器内横向滚动，桌面与移动端横向溢出均为 0 |
+| 可视化面板无法区分“占位上游”和“真实模型” | cloud-demo `/health` 增加 `checks.upstream`，Demo 健康面板显示上游来源（`UPSTREAM_KIND=mock` 时明确提示译文带 `[源->目标]` 前缀） |
+
+复核验证（全部通过）：
+
+- 根项目 `pnpm typecheck`、`pnpm lint`、`pnpm test`（89 文件 / 518 测试）、`pnpm build`、`pnpm build:web-demo`
+- cloud-demo 直接 Node 入口：`tsc --noEmit`、ESLint、Vitest（7 文件 / 65 测试）
+- 浏览器实测（Chromium 1440×1200 与 390×844，`http://localhost:4173`）：正文扫描 7 段 → 逐段渲染 `.imt-target`；「仅中文」7 段替换且隐藏原文；「双语」4 段命中可读配对布局；「原文」清空全部注入节点并还原 DOM；新增动态段落被 `MutationObserver` 捕获并纳入翻译（8 段）；云端地址不可达时 8 段全部回退 `mock` 且逐段标记 `回退=是`；控制台无报错
+- 该次实测产物：`outputs/web-demo-page-translation.png`、`outputs/web-demo-full.png`

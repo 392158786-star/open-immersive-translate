@@ -81,6 +81,8 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
 .meta-table {
   width: 100%; border-collapse: collapse; margin-top: 8px; font-size: 12px;
 }
+.table-scroll { margin-top: 8px; overflow-x: auto; }
+.table-scroll .meta-table { margin-top: 0; min-width: 560px; }
 .meta-table th, .meta-table td {
   border: 1px solid #ddd; padding: 4px 6px; text-align: left;
 }

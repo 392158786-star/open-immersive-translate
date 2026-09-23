@@ -16,7 +16,11 @@ import {
   serializeSrt,
   serializeWebVtt,
 } from "../content/features/subtitle/parsers";
-import type { SubtitleCue } from "../shared/subtitle-types";
+import type { SubtitleExportMode } from "../content/features/subtitle/parsers";
+import type {
+  BilingualSubtitleCue,
+  SubtitleCue,
+} from "../shared/subtitle-types";
 
 export interface CloudDemoConfig {
   baseUrl: string;
@@ -46,6 +50,7 @@ export interface HealthReport {
     api: { status: string };
     rds: { status: string; latencyMs?: number; detail?: string };
     redis: { status: string; latencyMs?: number; detail?: string };
+    upstream?: { status: string; latencyMs?: number; detail?: string };
   };
 }
 
@@ -65,7 +70,7 @@ export interface AcademicTermResult {
 
 export interface SubtitleTranslationResult {
   cues: SubtitleCue[];
-  translatedCues: SubtitleCue[];
+  translatedCues: BilingualSubtitleCue[];
   serialized: string;
   meta: TranslationMetadata;
 }
@@ -234,10 +239,13 @@ export function parseSubtitleContent(
 }
 
 export function serializeSubtitle(
-  cues: SubtitleCue[],
+  cues: readonly BilingualSubtitleCue[],
   format: "srt" | "vtt",
+  mode: SubtitleExportMode = "translation-only",
 ): string {
-  return format === "srt" ? serializeSrt(cues) : serializeWebVtt(cues);
+  return format === "srt"
+    ? serializeSrt(cues, mode)
+    : serializeWebVtt(cues, mode);
 }
 
 export async function translateSubtitle(
@@ -248,22 +256,28 @@ export async function translateSubtitle(
   config: CloudDemoConfig,
 ): Promise<SubtitleTranslationResult> {
   const cues = parseSubtitleContent(content, format);
-  const translatedCues: SubtitleCue[] = [];
+  const translatedCues: BilingualSubtitleCue[] = [];
+  const cacheLayers = new Set<string>();
+  let latencyMs = 0;
+  let fallbackUsed = false;
   for (const cue of cues) {
     const result = await translateText(cue.text, from, to, config);
-    translatedCues.push({ ...cue, text: result.text });
+    translatedCues.push({ ...cue, translation: result.text });
+    cacheLayers.add(result.meta.cacheLayer);
+    latencyMs += result.meta.latencyMs;
+    fallbackUsed = fallbackUsed || result.meta.fallbackUsed;
   }
-  const serialized = serializeSubtitle(translatedCues, format);
+  const serialized = serializeSubtitle(translatedCues, format, "translation-only");
   return {
     cues,
     translatedCues,
     serialized,
     meta: {
       requestId: "batch",
-      cacheLayer: "mixed",
-      latencyMs: 0,
-      serviceUsed: "cloud+fallback",
-      fallbackUsed: translatedCues.some((_, i) => i >= 0),
+      cacheLayer: [...cacheLayers].join("+") || "none",
+      latencyMs,
+      serviceUsed: fallbackUsed ? "cloud+fallback" : "cloud",
+      fallbackUsed,
     },
   };
 }

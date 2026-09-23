@@ -4,6 +4,62 @@
 
 将比赛版本的云端 API 和可视化 Demo 部署到华为云，并通过公网地址在线演示核心功能。
 
+## 一键部署
+
+`deploy/deploy-ecs.sh` 是幂等的 bash 脚本，在 ECS 上执行一条命令即可完成部署：
+
+```bash
+bash deploy/deploy-ecs.sh
+```
+
+### 脚本执行流程
+
+1. 拉取 `competition/huawei-codearts` 分支最新代码
+2. 进入 `cloud-demo/`，检查 `.env` 存在（不打印内容）
+3. 运行 `node scripts/preflight.ts`，有 FAIL 项则中止并提示
+4. `docker compose -f docker-compose.huawei.yml up -d --build` 构建并启动容器
+5. 轮询 `curl http://127.0.0.1:8787/health`，直到 `api`/`rds`/`redis`/`upstream` 全为 `up`（最多 60 秒）
+6. 输出访问地址与日志命令
+
+### 需要的环境变量
+
+在 `cloud-demo/.env` 中配置（从 `.env.example` 复制后填写）：
+
+| 变量 | 说明 | 示例 |
+|------|------|------|
+| `RDS_HOST` | RDS 内网 IP | `192.168.x.x` |
+| `RDS_PORT` | RDS 端口 | `5432` |
+| `RDS_DATABASE` | 数据库名 | `cloud_demo` |
+| `RDS_USER` | 数据库用户 | `cloud_demo` |
+| `RDS_PASSWORD` | 数据库密码 | `<strong-password>` |
+| `RDS_SSL` | 启用 SSL | `true` |
+| `REDIS_HOST` | DCS 内网 IP | `192.168.x.x` |
+| `REDIS_PORT` | DCS 端口 | `6379` |
+| `REDIS_PASSWORD` | DCS 密码 | `<dcs-password>` |
+| `API_TOKEN` | API 鉴权令牌（≥8 位） | `<your-token>` |
+| `UPSTREAM_KIND` | 上游类型（`mock` 或 `http`） | `http` |
+| `UPSTREAM_BASE_URL` | 上游模型地址 | `https://<model-url>` |
+| `UPSTREAM_API_KEY` | 上游访问令牌 | `<model-key>` |
+
+### 失败排查
+
+| 失败步骤 | 排查方式 |
+|---------|---------|
+| 预检失败 | 查看 preflight 输出的 `[FAIL]` 行，按提示修正 `.env` |
+| Docker 构建失败 | `docker compose -f docker-compose.huawei.yml logs app` |
+| 健康检查超时 | 确认 RDS/DCS 安全组已放通 ECS 内网 IP；检查 `.env` 中地址是否为内网 |
+| 容器未启动 | `docker compose -f docker-compose.huawei.yml ps`，确认容器状态 |
+
+### 网站翻译 Demo 的 API 地址注入
+
+Demo 页面支持三种方式配置云端 API 地址，优先级从高到低：
+
+1. **URL 参数**：`?api=https://your-cloud.example.com`
+2. **构建变量**：`VITE_CLOUD_API_BASE=https://your-cloud.example.com`（构建时注入）
+3. **默认值**：`http://localhost:8787`
+
+页面上的「API 地址」输入框始终可手动修改。Nginx 配置将 `/v1/` 和 `/health` 反代到同域，因此部署后 Demo 无需额外配置即可访问同域 API。
+
 ## 推荐部署方式
 
 ### 方式一：ECS + Docker Compose

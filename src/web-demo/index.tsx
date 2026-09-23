@@ -22,10 +22,12 @@ import {
   observeDynamicContent,
   injectPageStyles,
   clearPageTranslations,
+  isParagraphTranslated,
   scanPage,
   type PageTranslationMode,
   type PageTranslationReport,
 } from "./page-translator";
+import { readApiBaseUrlFromLocation } from "./config";
 import type { LangCode } from "../shared/types";
 import "./styles.css";
 
@@ -69,7 +71,12 @@ const Section: FunctionComponent<SectionProps> = ({ title, children }) => (
 );
 
 function App(): preact.JSX.Element {
-  const [baseUrl, setBaseUrl] = useState("http://localhost:8787");
+  const [baseUrl, setBaseUrl] = useState(() =>
+    readApiBaseUrlFromLocation(
+      typeof window !== "undefined" ? window.location.search : "",
+      import.meta.env.VITE_CLOUD_API_BASE ?? null,
+    ),
+  );
   const [apiKey, setApiKey] = useState("");
   const [fromLang, setFromLang] = useState<LangCode>("auto");
   const [toLang, setToLang] = useState<LangCode>("zh-CN");

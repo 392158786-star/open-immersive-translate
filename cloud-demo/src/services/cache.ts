@@ -11,6 +11,7 @@ export const TRANSLATION_CACHE_PREFIX = "tm";
 /** Minimal cache contract shared by the cloud API and the demo. */
 export interface CacheStore {
   get<T>(key: string): Promise<T | null>;
+  getMany?<T>(keys: readonly string[]): Promise<Array<T | null>>;
   set(key: string, value: unknown, ttlSeconds?: number): Promise<void>;
   delete(key: string): Promise<void>;
   ping(): Promise<boolean>;
@@ -52,11 +53,17 @@ export function translationCacheKey(input: TranslationCacheKeyInput): string {
 /** The subset of the ioredis client the cache actually uses. */
 export interface RedisCommandClient {
   get(key: string): Promise<string | null>;
+  pipeline?(): RedisPipelineClient;
   set(key: string, value: string): Promise<unknown>;
   setex(key: string, ttlSeconds: number, value: string): Promise<unknown>;
   del(key: string): Promise<number>;
   ping(): Promise<string>;
   quit(): Promise<unknown>;
+}
+
+export interface RedisPipelineClient {
+  get(key: string): RedisPipelineClient;
+  exec(): Promise<Array<[Error | null, unknown]> | null>;
 }
 
 export interface RedisCacheStoreOptions {
@@ -104,6 +111,28 @@ export class RedisCacheStore implements CacheStore {
       await this.client.del(key);
       return null;
     }
+  }
+
+  async getMany<T>(keys: readonly string[]): Promise<Array<T | null>> {
+    if (keys.length === 0) return [];
+    const pipeline = this.client.pipeline?.();
+    if (!pipeline) {
+      return Promise.all(keys.map((key) => this.get<T>(key)));
+    }
+
+    for (const key of keys) pipeline.get(key);
+    const results = await pipeline.exec();
+    if (!results) return keys.map(() => null);
+
+    return results.map(([error, raw], index) => {
+      if (error || typeof raw !== "string") return null;
+      try {
+        return JSON.parse(raw) as T;
+      } catch {
+        void this.client.del(keys[index] ?? "");
+        return null;
+      }
+    });
   }
 
   async set(key: string, value: unknown, ttlSeconds?: number): Promise<void> {

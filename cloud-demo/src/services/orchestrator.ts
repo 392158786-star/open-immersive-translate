@@ -6,6 +6,7 @@ import {
 } from "./cache.ts";
 import type {
   CacheLayer,
+  FindMemoryInput,
   RecordRequestInput,
   RequestStatus,
   SaveMemoryInput,
@@ -30,6 +31,17 @@ export interface TranslateOutput {
   latencyMs: number;
 }
 
+export interface TranslateBatchInput {
+  texts: readonly string[];
+  from: string;
+  to: string;
+  serviceId?: string;
+}
+
+export interface TranslateBatchOutput {
+  results: TranslateOutput[];
+}
+
 /**
  * Persistence subset the orchestrator needs.
  * `PostgresMemoryRepository` satisfies this structurally.
@@ -41,6 +53,9 @@ export interface TranslationMemoryStore {
     toLang: string,
     serviceId: string,
   ): Promise<TranslationMemory | null>;
+  findMemories?(
+    inputs: readonly FindMemoryInput[],
+  ): Promise<TranslationMemory[]>;
   saveMemory(input: SaveMemoryInput): Promise<TranslationMemory>;
   incrementMemoryHit(
     sourceHash: string,
@@ -67,6 +82,14 @@ interface CachedTranslation {
   targetText: string;
 }
 
+interface BatchEntry {
+  index: number;
+  text: string;
+  sourceHash: string;
+  cacheKey: string;
+  targetText?: string;
+  cacheLayer?: CacheLayer;
+}
 interface RequestLogEntry {
   requestId: string;
   sourceHash: string;
@@ -187,6 +210,145 @@ export class TranslationOrchestrator {
     }
   }
 
+  async translateBatch(
+    input: TranslateBatchInput,
+  ): Promise<TranslateBatchOutput> {
+    if (input.texts.length === 0) return { results: [] };
+    if (input.texts.length === 1) {
+      return {
+        results: [
+          await this.translate({
+            text: input.texts[0] as string,
+            from: input.from,
+            to: input.to,
+            ...(input.serviceId !== undefined
+              ? { serviceId: input.serviceId }
+              : {}),
+          }),
+        ],
+      };
+    }
+
+    const startedAt = this.now();
+    const requestId = this.generateRequestId();
+    const serviceId = input.serviceId ?? this.upstream.id;
+    const entries: BatchEntry[] = input.texts.map((text, index) => ({
+      index,
+      text,
+      sourceHash: sha1Hex(text),
+      cacheKey: translationCacheKey({
+        serviceId,
+        from: input.from,
+        to: input.to,
+        text,
+      }),
+    }));
+
+    try {
+      const cached = await this.readCacheMany(
+        entries.map((entry) => entry.cacheKey),
+      );
+      entries.forEach((entry, index) => {
+        const targetText = cached[index];
+        if (targetText !== null && targetText !== undefined) {
+          entry.targetText = targetText;
+          entry.cacheLayer = "redis";
+        }
+      });
+
+      const memoryCandidates = entries.filter(
+        (entry) => entry.targetText === undefined,
+      );
+      const remembered = await this.readMemories(
+        memoryCandidates,
+        input,
+        serviceId,
+      );
+      for (let index = 0; index < memoryCandidates.length; index += 1) {
+        const entry = memoryCandidates[index];
+        const targetText = remembered[index];
+        if (!entry || targetText === null || targetText === undefined) continue;
+        entry.targetText = targetText;
+        entry.cacheLayer = "rds";
+        await this.bumpMemoryHit(
+          entry.sourceHash,
+          { text: entry.text, from: input.from, to: input.to },
+          serviceId,
+        );
+        await this.writeCache(entry.cacheKey, targetText);
+      }
+
+      const misses = entries.filter((entry) => entry.targetText === undefined);
+      if (misses.length > 0) {
+        const translations = await this.upstream.translate({
+          texts: misses.map((entry) => entry.text),
+          from: input.from,
+          to: input.to,
+        });
+        if (translations.length !== misses.length) {
+          throw new Error("上游翻译服务返回的译文数量与请求不一致。");
+        }
+        const cacheLayer: CacheLayer = this.hasStorage()
+          ? "upstream"
+          : "disabled";
+        for (let index = 0; index < misses.length; index += 1) {
+          const entry = misses[index];
+          const targetText = translations[index];
+          if (!entry || targetText === undefined) {
+            throw new Error("上游翻译服务未返回译文。");
+          }
+          entry.targetText = targetText;
+          entry.cacheLayer = cacheLayer;
+          await this.writeCache(entry.cacheKey, targetText);
+          await this.writeMemory(
+            entry.sourceHash,
+            { text: entry.text, from: input.from, to: input.to },
+            serviceId,
+            targetText,
+          );
+        }
+      }
+
+      const latencyMs = this.now() - startedAt;
+      const results = entries.map((entry) =>
+        this.output(
+          requestId,
+          entry.text,
+          entry.targetText as string,
+          entry.cacheLayer ?? "disabled",
+          latencyMs,
+        ),
+      );
+      for (const entry of entries) {
+        await this.record({
+          requestId,
+          sourceHash: entry.sourceHash,
+          fromLang: input.from,
+          toLang: input.to,
+          cacheLayer: entry.cacheLayer ?? "disabled",
+          status: "success",
+          latencyMs,
+        });
+      }
+      return { results };
+    } catch (error) {
+      const latencyMs = this.now() - startedAt;
+      for (const entry of entries) {
+        await this.record({
+          requestId,
+          sourceHash: entry.sourceHash,
+          fromLang: input.from,
+          toLang: input.to,
+          cacheLayer: entry.cacheLayer ?? "upstream",
+          status: "error",
+          latencyMs,
+          errorCode: errorCodeOf(error),
+        });
+      }
+      throw error;
+    }
+  }
+
   private output(
     requestId: string,
     sourceText: string,
@@ -210,6 +372,29 @@ export class TranslationOrchestrator {
     } catch (error) {
       this.warn(error, "cache.get");
       return null;
+    }
+  }
+
+  private async readCacheMany(
+    keys: readonly string[],
+  ): Promise<Array<string | null>> {
+    if (this.cache === undefined) return keys.map(() => null);
+    try {
+      const cached = this.cache.getMany
+        ? await this.cache.getMany<CachedTranslation>(keys)
+        : await Promise.all(
+            keys.map((key) => this.cache?.get<CachedTranslation>(key)),
+          );
+      return cached.map((item) =>
+        item !== null &&
+        item !== undefined &&
+        typeof item.targetText === "string"
+          ? item.targetText
+          : null,
+      );
+    } catch (error) {
+      this.warn(error, "cache.getMany");
+      return keys.map(() => null);
     }
   }
 
@@ -240,6 +425,49 @@ export class TranslationOrchestrator {
     } catch (error) {
       this.warn(error, "memory.findMemory");
       return null;
+    }
+  }
+
+  private async readMemories(
+    entries: readonly BatchEntry[],
+    input: TranslateBatchInput,
+    serviceId: string,
+  ): Promise<Array<string | null>> {
+    if (this.memory?.findMemories === undefined) {
+      return Promise.all(
+        entries.map((entry) =>
+          this.readMemory(
+            entry.sourceHash,
+            { text: entry.text, from: input.from, to: input.to },
+            serviceId,
+          ),
+        ),
+      );
+    }
+    try {
+      const memories = await this.memory.findMemories(
+        entries.map((entry) => ({
+          sourceHash: entry.sourceHash,
+          fromLang: input.from,
+          toLang: input.to,
+          serviceId,
+        })),
+      );
+      const byKey = new Map(
+        memories.map((memory) => [
+          `${memory.sourceHash}|${memory.fromLang}|${memory.toLang}|${memory.serviceId}`,
+          memory.targetText,
+        ]),
+      );
+      return entries.map(
+        (entry) =>
+          byKey.get(
+            `${entry.sourceHash}|${input.from}|${input.to}|${serviceId}`,
+          ) ?? null,
+      );
+    } catch (error) {
+      this.warn(error, "memory.findMemories");
+      return entries.map(() => null);
     }
   }
 

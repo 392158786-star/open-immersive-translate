@@ -40,6 +40,7 @@ function createClock(stepMs: number): () => number {
 interface FakeCache {
   cache: CacheStore;
   store: Map<string, string>;
+  getManyCalls: string[][];
 }
 
 function createFakeCache(
@@ -47,6 +48,7 @@ function createFakeCache(
   overrides: Partial<CacheStore> = {},
 ): FakeCache {
   const store = new Map<string, string>(Object.entries(initial));
+  const getManyCalls: string[][] = [];
   const base: CacheStore = {
     async get<T>(key: string): Promise<T | null> {
       const raw = store.get(key);
@@ -54,6 +56,13 @@ function createFakeCache(
     },
     async set(key: string, value: unknown): Promise<void> {
       store.set(key, JSON.stringify(value));
+    },
+    async getMany<T>(keys: readonly string[]): Promise<Array<T | null>> {
+      getManyCalls.push([...keys]);
+      return keys.map((key) => {
+        const raw = store.get(key);
+        return raw === undefined ? null : (JSON.parse(raw) as T);
+      });
     },
     async delete(key: string): Promise<void> {
       store.delete(key);
@@ -66,7 +75,7 @@ function createFakeCache(
     },
   };
   const cache: CacheStore = { ...base, ...overrides };
-  return { cache, store };
+  return { cache, store, getManyCalls };
 }
 
 interface FakeMemory {
@@ -88,6 +97,17 @@ function createMemoryRecord(targetText: string): TranslationMemory {
     hitCount: 1,
     createdAt: "2026-09-23T00:00:00.000Z",
     updatedAt: "2026-09-23T00:00:00.000Z",
+  };
+}
+
+function createMemoryFor(
+  sourceText: string,
+  targetText: string,
+): TranslationMemory {
+  return {
+    ...createMemoryRecord(targetText),
+    sourceHash: sha1Hex(sourceText),
+    sourceText,
   };
 }
 
@@ -445,6 +465,88 @@ describe("TranslationOrchestrator", () => {
       latencyMs: 30,
       errorCode: "Error",
     });
+  });
+
+  it("批量请求一次读取 Redis 并保持返回顺序", async () => {
+    const fakeCache = createFakeCache({
+      [keyFor("hello")]: JSON.stringify({ targetText: "你好" }),
+      [keyFor("world")]: JSON.stringify({ targetText: "世界" }),
+    });
+    const fakeUpstream = createFakeUpstream();
+    const orchestrator = createOrchestrator({
+      upstream: fakeUpstream.upstream,
+      cache: fakeCache.cache,
+      stepMs: 5,
+    });
+
+    const result = await orchestrator.translateBatch({
+      texts: ["hello", "world"],
+      from: "en",
+      to: "zh",
+    });
+
+    expect(result.results.map((item) => item.targetText)).toEqual([
+      "你好",
+      "世界",
+    ]);
+    expect(result.results.every((item) => item.cacheLayer === "redis")).toBe(
+      true,
+    );
+    expect(fakeCache.getManyCalls).toHaveLength(1);
+    expect(fakeUpstream.calls).toEqual([]);
+  });
+
+  it("批量请求只把未命中段落交给上游一次", async () => {
+    const fakeCache = createFakeCache({
+      [keyFor("hello")]: JSON.stringify({ targetText: "你好" }),
+    });
+    const remembered = createMemoryFor("world", "世界");
+    const fakeMemory = createFakeMemory(null, {
+      async findMemories(): Promise<TranslationMemory[]> {
+        return [remembered];
+      },
+    });
+    const fakeUpstream = createFakeUpstream();
+    const orchestrator = createOrchestrator({
+      upstream: fakeUpstream.upstream,
+      cache: fakeCache.cache,
+      memory: fakeMemory.memory,
+      stepMs: 5,
+    });
+
+    const result = await orchestrator.translateBatch({
+      texts: ["hello", "world", "again"],
+      from: "en",
+      to: "zh",
+    });
+
+    expect(result.results.map((item) => item.cacheLayer)).toEqual([
+      "redis",
+      "rds",
+      "upstream",
+    ]);
+    expect(fakeUpstream.calls).toEqual(["again"]);
+  });
+
+  it("批量上游返回条数不匹配时抛错", async () => {
+    const fakeUpstream: TranslationUpstream = {
+      id: "mock",
+      async translate(): Promise<string[]> {
+        return ["只有一条"];
+      },
+    };
+    const orchestrator = createOrchestrator({
+      upstream: fakeUpstream,
+      stepMs: 5,
+    });
+
+    await expect(
+      orchestrator.translateBatch({
+        texts: ["first", "second"],
+        from: "en",
+        to: "zh",
+      }),
+    ).rejects.toThrow("上游翻译服务返回的译文数量与请求不一致");
   });
 
   it("serviceId 参与缓存 key 计算", async () => {

@@ -25,6 +25,13 @@ export interface SaveMemoryInput {
   serviceId: string;
 }
 
+export interface FindMemoryInput {
+  sourceHash: string;
+  fromLang: string;
+  toLang: string;
+  serviceId: string;
+}
+
 export interface RecordRequestInput {
   requestId: string;
   sourceHash: string;
@@ -157,6 +164,32 @@ export class PostgresMemoryRepository {
     );
     const row = result.rows[0];
     return row ? mapMemory(row) : null;
+  }
+
+  async findMemories(
+    inputs: readonly FindMemoryInput[],
+  ): Promise<TranslationMemory[]> {
+    if (inputs.length === 0) return [];
+    const values: string[] = [];
+    const placeholders = inputs.map((input, index) => {
+      const offset = index * 4;
+      values.push(
+        input.sourceHash,
+        input.fromLang,
+        input.toLang,
+        input.serviceId,
+      );
+      return `($${offset + 1}, $${offset + 2}, $${offset + 3}, $${offset + 4})`;
+    });
+    const result = await this.database.query<MemoryRow>(
+      `SELECT id, source_hash, source_text, target_text, from_lang, to_lang,
+              service_id, hit_count, created_at, updated_at
+         FROM translation_memory
+        WHERE (source_hash, from_lang, to_lang, service_id)
+              IN (${placeholders.join(", ")})`,
+      values,
+    );
+    return result.rows.map(mapMemory);
   }
 
   async saveMemory(input: SaveMemoryInput): Promise<TranslationMemory> {

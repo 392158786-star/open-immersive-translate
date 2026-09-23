@@ -68,6 +68,23 @@ describe("POST /v1/translate", () => {
     await app.close();
   });
 
+  it("批量字段返回按顺序排列的结果", async () => {
+    const app = await buildServer(loadConfig(testEnv), {
+      orchestrator: makeOrchestrator(),
+    });
+    const response = await app.inject({
+      method: "POST",
+      url: "/v1/translate",
+      headers: authHeader,
+      body: { texts: ["hello", "world"], from: "en", to: "zh" },
+    });
+    expect(response.statusCode).toBe(200);
+    expect(response.json().results.map((item: { targetText: string }) => item.targetText)).toEqual(
+      ["[en->zh] hello", "[en->zh] world"],
+    );
+    await app.close();
+  });
+
   it("缺少 text 字段时返回 400", async () => {
     const app = await buildServer(loadConfig(testEnv), {
       orchestrator: makeOrchestrator(),

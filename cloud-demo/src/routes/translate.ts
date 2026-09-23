@@ -2,12 +2,21 @@ import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import type { TranslationOrchestrator } from "../services/orchestrator.ts";
 
-const translateBodySchema = z.object({
-  text: z.string().min(1),
-  from: z.string().min(1),
-  to: z.string().min(1),
-  serviceId: z.string().min(1).optional(),
-});
+const translateBodySchema = z
+  .object({
+    text: z.string().min(1).optional(),
+    texts: z.array(z.string().min(1)).min(1).max(20).optional(),
+    from: z.string().min(1),
+    to: z.string().min(1),
+    serviceId: z.string().min(1).optional(),
+  })
+  .refine(
+    (body) =>
+      (body.text === undefined ? 0 : 1) +
+        (body.texts === undefined ? 0 : 1) ===
+      1,
+    { message: "text 与 texts 必须且只能提供一个。" },
+  );
 
 export function registerTranslateRoute(
   app: FastifyInstance,
@@ -22,6 +31,23 @@ export function registerTranslateRoute(
       });
       return;
     }
-    return orchestrator.translate(parsed.data);
+    if (parsed.data.texts !== undefined) {
+      return orchestrator.translateBatch({
+        texts: parsed.data.texts,
+        from: parsed.data.from,
+        to: parsed.data.to,
+        ...(parsed.data.serviceId !== undefined
+          ? { serviceId: parsed.data.serviceId }
+          : {}),
+      });
+    }
+    return orchestrator.translate({
+      text: parsed.data.text as string,
+      from: parsed.data.from,
+      to: parsed.data.to,
+      ...(parsed.data.serviceId !== undefined
+        ? { serviceId: parsed.data.serviceId }
+        : {}),
+    });
   });
 }

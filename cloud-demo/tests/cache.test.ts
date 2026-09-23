@@ -5,6 +5,7 @@ import {
   sha1Hex,
   translationCacheKey,
   type RedisCommandClient,
+  type RedisPipelineClient,
 } from "../src/services/cache.ts";
 
 const redisConfig = { host: "127.0.0.1", port: 6379, db: 0 };
@@ -24,6 +25,21 @@ function createFakeClient(
     async get(key: string): Promise<string | null> {
       calls.push({ command: "get", args: [key] });
       return store.get(key) ?? null;
+    },
+    pipeline(): RedisPipelineClient {
+      const keys: string[] = [];
+      const pipeline: RedisPipelineClient = {
+        get(key: string): RedisPipelineClient {
+          calls.push({ command: "pipeline.get", args: [key] });
+          keys.push(key);
+          return pipeline;
+        },
+        async exec(): Promise<Array<[Error | null, unknown]> | null> {
+          calls.push({ command: "pipeline.exec", args: [] });
+          return keys.map((key) => [null, store.get(key) ?? null]);
+        },
+      };
+      return pipeline;
     },
     async set(key: string, value: string): Promise<unknown> {
       calls.push({ command: "set", args: [key, value] });
@@ -189,6 +205,23 @@ describe("RedisCacheStore", () => {
 
     await expect(store.get("missing")).resolves.toBeNull();
     expect(fake.calls).toEqual([{ command: "get", args: ["missing"] }]);
+  });
+
+  it("批量读取使用 pipeline 并保持顺序", async () => {
+    const fake = createFakeClient();
+    fake.store.set("a", JSON.stringify({ text: "甲" }));
+    fake.store.set("b", JSON.stringify({ text: "乙" }));
+    const store = createStore(fake);
+
+    await expect(
+      store.getMany<{ text: string }>(["a", "missing", "b"]),
+    ).resolves.toEqual([{ text: "甲" }, null, { text: "乙" }]);
+    expect(fake.calls.map((call) => call.command)).toEqual([
+      "pipeline.get",
+      "pipeline.get",
+      "pipeline.get",
+      "pipeline.exec",
+    ]);
   });
 
   it("脏数据返回 null 并清理该 key", async () => {

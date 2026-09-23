@@ -338,10 +338,6 @@ function markInteractiveSource(
 }
 
 function ensureSourceMarkers(state: RenderState): void {
-  if (state.sourceElements.length > 0 || state.sourceTexts.length > 0) {
-    return;
-  }
-
   if (state.interactiveTarget) {
     markInteractiveSource(state, state.interactiveTarget);
     return;
@@ -360,10 +356,11 @@ function ensureSourceMarkers(state: RenderState): void {
   for (const node of nodes) {
     if (node.nodeType === Node.ELEMENT_NODE) {
       const element = node as Element;
-      if (isInteractiveElement(element)) {
-        for (const text of textNodesInside(element)) {
-          wrapSourceText(state, text);
-        }
+      if (
+        state.sourceElements.some(
+          (source) => source.element === element,
+        )
+      ) {
         continue;
       }
       state.sourceElements.push({
@@ -379,6 +376,9 @@ function ensureSourceMarkers(state: RenderState): void {
     }
 
     const text = node as Text;
+    if (text.parentElement?.dataset.imt === "source") {
+      continue;
+    }
     const parent = text.parentNode;
     if (!parent) {
       continue;

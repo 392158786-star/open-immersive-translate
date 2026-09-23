@@ -11,7 +11,7 @@ import {
 
 describe("configuration migration", () => {
   it("uses the zero-config China-friendly translator by default", () => {
-    expect(DEFAULT_CONFIG.service).toBe("youdao-free");
+    expect(DEFAULT_CONFIG.service).toBe("transmart");
     expect(DEFAULT_CONFIG.targetLanguage).toBe("zh-CN");
     expect(DEFAULT_CONFIG.translationMode).toBe("translation");
     expect(DEFAULT_CONFIG.translateToPageEndImmediately).toBe(true);
@@ -22,12 +22,12 @@ describe("configuration migration", () => {
     expect(DEFAULT_CONFIG.services["youdao-free"]).toMatchObject({
       kind: "youdao-free",
       enabled: true,
-      fallbackService: "transmart",
+      fallbackService: "local-model",
     });
     expect(DEFAULT_CONFIG.services.transmart).toMatchObject({
       kind: "transmart",
       enabled: true,
-      fallbackService: "local-model",
+      fallbackService: "youdao-free",
     });
     expect(DEFAULT_CONFIG.services.mymemory).toMatchObject({
       kind: "mymemory",
@@ -44,11 +44,11 @@ describe("configuration migration", () => {
     });
 
     expect(migrated.version).toBe(CONFIG_VERSION);
-    expect(migrated.service).toBe("youdao-free");
+    expect(migrated.service).toBe("transmart");
     expect(migrated.services["youdao-free"]?.fallbackService).toBe(
-      "transmart",
+      "local-model",
     );
-    expect(migrated.services.transmart?.fallbackService).toBe("local-model");
+    expect(migrated.services.transmart?.fallbackService).toBe("youdao-free");
     expect(migrated.services.mymemory?.fallbackService).toBe("local-model");
     expect(migrated.services["local-model"]?.fallbackService).toBeUndefined();
   });
@@ -75,11 +75,11 @@ describe("configuration migration", () => {
     expect(migrated.version).toBe(CONFIG_VERSION);
     expect(migrated.translationMode).toBe("translation");
     expect(migrated.services["youdao-free"]?.fallbackService).toBe(
-      "transmart",
+      "local-model",
     );
     expect(migrated.services.transmart).toMatchObject({
       enabled: true,
-      fallbackService: "local-model",
+      fallbackService: "youdao-free",
     });
   });
 
@@ -102,10 +102,10 @@ describe("configuration migration", () => {
     });
 
     expect(migrated.version).toBe(CONFIG_VERSION);
-    expect(migrated.service).toBe("youdao-free");
-    expect(migrated.services.transmart?.fallbackService).toBe("local-model");
+    expect(migrated.service).toBe("transmart");
+    expect(migrated.services.transmart?.fallbackService).toBe("youdao-free");
     expect(migrated.services["youdao-free"]?.fallbackService).toBe(
-      "transmart",
+      "local-model",
     );
   });
 

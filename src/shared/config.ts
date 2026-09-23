@@ -14,7 +14,7 @@ import { DEFAULT_SUBTITLE_CONFIG, type SubtitleConfig } from "./subtitle-types";
 import type { Config, ConfigPatch, Rule, ServiceConfig } from "./types";
 
 /** Current persisted configuration format. */
-export const CONFIG_VERSION = 12;
+export const CONFIG_VERSION = 13;
 
 /** Storage key containing the complete configuration object. */
 export const CONFIG_STORAGE_KEY = "config";
@@ -202,7 +202,7 @@ export const DEFAULT_SERVICES: Record<string, ServiceConfig> = {
     kind: "youdao-free",
     enabled: true,
     timeoutMs: 12_000,
-    fallbackService: "transmart",
+    fallbackService: "local-model",
   },
   "local-model": {
     kind: "local-model",
@@ -229,7 +229,7 @@ export const DEFAULT_SERVICES: Record<string, ServiceConfig> = {
   transmart: {
     kind: "transmart",
     enabled: true,
-    fallbackService: "local-model",
+    fallbackService: "youdao-free",
   },
   niutrans: { kind: "niutrans", enabled: false },
   openl: { kind: "openl", enabled: false },
@@ -277,7 +277,7 @@ export const configSchema: z.ZodType<Config> = z.object({
   translationMode: z.enum(["dual", "translation"]).default("translation"),
   theme: z.string().default("underline"),
   font: z.string().optional(),
-  service: z.string().default("youdao-free"),
+  service: z.string().default("transmart"),
   services: z.record(z.string(), serviceConfigSchema).default(DEFAULT_SERVICES),
   shortcuts: z.record(z.string(), z.string()).default(DEFAULT_SHORTCUTS),
   alwaysTranslateSites: z.array(z.string()).default([]),
@@ -791,6 +791,37 @@ registerConfigMigration(11, (config) => ({
   version: 12,
   autoTranslationColor: true,
 }));
+
+// Transmart supports native batch requests (15 段 / 2500 字），比有道免费接口
+// 一段一请求快一个数量级，因此把它提到主服务，有道免费降为备用。
+registerConfigMigration(12, (config) => {
+  const services = isRecord(config.services) ? config.services : {};
+  return {
+    ...config,
+    version: 13,
+    service:
+      config.service === undefined || config.service === "youdao-free"
+        ? "transmart"
+        : config.service,
+    services: {
+      ...services,
+      transmart: {
+        ...DEFAULT_SERVICES.transmart,
+        ...(isRecord(services.transmart) ? services.transmart : {}),
+        enabled: true,
+        fallbackService: "youdao-free",
+      },
+      "youdao-free": {
+        ...DEFAULT_SERVICES["youdao-free"],
+        ...(isRecord(services["youdao-free"])
+          ? services["youdao-free"]
+          : {}),
+        enabled: true,
+        fallbackService: "local-model",
+      },
+    },
+  };
+});
 
 /** Upgrade unknown stored data and validate it as the current configuration. */
 export function migrateConfig(value: unknown): Config {

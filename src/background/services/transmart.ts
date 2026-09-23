@@ -24,6 +24,10 @@ interface TransmartResponse {
   message?: string;
 }
 
+function placeholderTokens(text: string): string[] {
+  return text.match(/\{\/?\d+\}/g) ?? [];
+}
+
 /** Tencent Transmart's public web endpoint; no stability guarantee is provided. */
 export class TransmartService extends BaseService {
   readonly limited = true;
@@ -102,6 +106,19 @@ export class TransmartService extends BaseService {
           serviceId: this.id,
           retryable: false,
         },
+      );
+    }
+    // 富文本占位符必须在译文里原样保留，否则内联元素会错位。
+    const missing = request.texts.flatMap((source, index) =>
+      placeholderTokens(source).filter(
+        (token) => !(texts[index] as string).includes(token),
+      ),
+    );
+    if (missing.length > 0) {
+      throw new TranslateError(
+        "parse",
+        `Transmart omitted inline placeholders: ${missing.join(", ")}.`,
+        { serviceId: this.id, retryable: false },
       );
     }
     return { texts: texts as string[] };

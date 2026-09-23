@@ -604,6 +604,47 @@ describe("other machine translation adapters", () => {
     expect(result.texts).toEqual(["你好"]);
   });
 
+  it("sends Transmart batches as one native text_list request", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(json({ auto_translation: ["一", "二", "三"] }));
+    vi.stubGlobal("fetch", fetchMock);
+    const service = new TransmartService();
+
+    const result = await service.translate(
+      { ...request, texts: ["one", "two", "three"] },
+      signal(),
+    );
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(JSON.parse(init.body as string)).toMatchObject({
+      source: { lang: "en", text_list: ["one", "two", "three"] },
+    });
+    expect(result.texts).toEqual(["一", "二", "三"]);
+    expect(service.maxBatchSize).toBe(15);
+    expect(service.maxBatchChars).toBe(2_500);
+  });
+
+  it("keeps Transmart inline placeholders and rejects dropped ones", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(json({ auto_translation: ["你好 {0} 世界"] }));
+    vi.stubGlobal("fetch", fetchMock);
+    const service = new TransmartService();
+
+    const kept = await service.translate(
+      { ...request, texts: ["Hello {0} world"] },
+      signal(),
+    );
+    expect(kept.texts).toEqual(["你好 {0} 世界"]);
+
+    fetchMock.mockResolvedValue(json({ auto_translation: ["你好世界"] }));
+    await expect(
+      service.translate({ ...request, texts: ["Hello {0} world"] }, signal()),
+    ).rejects.toThrow(/omitted inline placeholders/u);
+  });
+
   it("calls NiuTrans with form-encoded credentials", async () => {
     const fetchMock = vi.fn().mockResolvedValue(json({ tgt_text: "你好" }));
     vi.stubGlobal("fetch", fetchMock);

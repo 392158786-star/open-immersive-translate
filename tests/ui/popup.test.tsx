@@ -82,7 +82,7 @@ describe("Popup", () => {
     const toggle = await screen.findByRole("button", { name: "翻译" });
     await screen.findByText("example.com");
     expect((screen.getByLabelText("翻译服务") as HTMLSelectElement).value).toBe(
-      "youdao-free",
+      "transmart",
     );
     expect(stored.services.transmart).toMatchObject({
       kind: "transmart",

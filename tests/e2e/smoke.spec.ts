@@ -139,19 +139,19 @@ async function selectMockService(
     }
     if (!config) throw new Error("Extension defaults were not installed.");
     const services = config.services as Record<string, unknown>;
-    const fastService = services["youdao-free"] as
+    const fastService = services.transmart as
       | Record<string, unknown>
       | undefined;
-    const fallbackService = services.transmart as
+    const fallbackService = services["youdao-free"] as
       | Record<string, unknown>
       | undefined;
     const localModel = services["local-model"] as
       | Record<string, unknown>
       | undefined;
     if (
-      config.service !== "youdao-free" ||
+      config.service !== "transmart" ||
       fastService?.enabled !== true ||
-      fastService.fallbackService !== "transmart" ||
+      fastService.fallbackService !== "youdao-free" ||
       fallbackService?.enabled !== true
     ) {
       throw new Error("Fresh-install fast translation defaults are invalid.");

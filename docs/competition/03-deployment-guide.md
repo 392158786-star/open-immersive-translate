@@ -76,3 +76,26 @@ pnpm build
 - 公网 Demo 页面：`evidence/10-public-demo.png`
 - 健康检查结果：`evidence/11-health-check.png`
 - 回滚说明或演练记录：`evidence/12-rollback.png`
+
+## 网站翻译 Demo 的部署
+
+网站翻译 Demo 是静态产物，与云端 API 分开托管，便于单独更新页面而不用重启服务。
+
+1. 构建：`pnpm build:web-demo`，产物在 `dist-web-demo/`（`index.html` + `assets/`，资源为相对路径，可放在任意子目录）。
+2. 将 `dist-web-demo/` 上传到 ECS，由 Nginx 作为静态站点根目录托管。
+3. 在页面顶部「API 地址」填入云端 API 的公网地址；也可以让 Nginx 把 API 反代到同域，页面填同域地址即可，避免跨域配置。
+4. 演示前确认云端 API 与 RDS、Redis 已连通（`/health` 中 `checks.rds`、`checks.redis` 为 `up`）。
+
+### 接入真实大模型
+
+`cloud-demo` 默认使用确定性占位上游（`UPSTREAM_KIND=mock`），译文会带 `[源->目标]` 前缀，用来证明链路连通。正式演示与截图前必须切换成真实模型：
+
+```dotenv
+UPSTREAM_KIND=http
+UPSTREAM_BASE_URL=https://<模型或网关地址>
+UPSTREAM_API_KEY=<访问令牌>
+```
+
+上游契约：`POST {UPSTREAM_BASE_URL}/translate`，请求体 `{ "texts": ["..."], "from": "en", "to": "zh-CN" }`，响应体 `{ "translations": ["..."] }`。华为云 MaaS 等 OpenAI 兼容接口可以套一层该契约的适配服务。
+
+部署后访问 `/health`，`checks.upstream.status` 为 `up` 且 `detail` 显示「真实上游（UPSTREAM_KIND=http）」即表示已切换到真实模型；页面「缓存与健康状态」面板会同步显示该状态。

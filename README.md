@@ -5,9 +5,23 @@
 本项目参加华为云 CodeArts 代码智能体比赛，比赛版分支为 `competition/huawei-codearts`。
 
 - 比赛材料：[docs/competition/](docs/competition/)（项目概览、智能体使用记录、证据索引、实施日志）
+- 网站翻译 Demo（可视化演示入口）：[src/web-demo/](src/web-demo/)，复用扩展正文抽取与渲染注入模块
 - 云端 API 与可视化 Demo：[cloud-demo/](cloud-demo/)（Fastify + PostgreSQL + Redis，独立包）
 - 部署配置：[deploy/](deploy/)（Nginx 反向代理、ECS Docker Compose 部署指南）
 - 实施日志：[docs/competition/06-implementation-log.md](docs/competition/06-implementation-log.md)（P1–P7 阶段记录）
+
+### 本地运行网站翻译 Demo
+
+```bash
+# 1) 启动云端 API（RDS/Redis 未配置时自动降级，仍可演示缓存层与回退）
+cd cloud-demo && node src/server.ts        # http://127.0.0.1:8787
+
+# 2) 构建并预览网站翻译 Demo
+pnpm build:web-demo                        # 输出 dist-web-demo/
+node node_modules/vite/bin/vite.js preview --config vite.web-demo.config.ts --port 4173
+```
+
+打开 `http://localhost:4173/`：在「网页文章翻译」区域可选择原文/双语/仅中文，点击「翻译网页」后逐段渲染译文，并在表格中查看每段的缓存层、延迟、服务来源与回退状态。云端 API 地址可在页面顶部修改；云端不可用时自动回退本地 Mock 服务。真实模型译文需在 cloud-demo 中配置 `UPSTREAM_KIND=http` 与 `UPSTREAM_BASE_URL`（见 [cloud-demo/.env.example](cloud-demo/.env.example)）。
 
 ## 这个项目是什么？
 

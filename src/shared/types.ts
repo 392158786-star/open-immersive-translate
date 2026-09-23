@@ -234,6 +234,7 @@ export type ServiceKind =
   | "openl"
   | "azure-openai"
   | "custom-http"
+  | "cloud"
   | "mock";
 
 /** User-editable settings for one translation service. */

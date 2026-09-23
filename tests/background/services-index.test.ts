@@ -20,6 +20,7 @@ describe("service registry", () => {
       "local-model",
       "deeplx",
       "custom-http",
+      "cloud",
       "mock",
     ]);
     expect(getService("google")?.placeholder).toEqual({

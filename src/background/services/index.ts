@@ -1,4 +1,5 @@
 import { ClaudeService } from "./claude";
+import { CloudService } from "./cloud";
 import { CustomHttpService } from "./custom-http";
 import { DeepLXService } from "./deeplx";
 import { GoogleService } from "./google";
@@ -27,6 +28,7 @@ const services: TranslationService[] = [
   new LocalModelService(),
   new DeepLXService(),
   new CustomHttpService(),
+  new CloudService(),
   new MockService(),
 ];
 
@@ -143,6 +145,17 @@ export function createService(
         method: config.method,
         requestBodyTemplate: config.requestBodyTemplate,
         responseJsonPath: config.responseJsonPath,
+      });
+    case "cloud":
+      return new CloudService({
+        id,
+        apiKey: config.apiKey,
+        baseUrl: config.baseUrl,
+        headers: config.headers,
+        timeoutMs: config.timeoutMs,
+        maxBatchSize: config.maxBatchSize,
+        maxBatchChars: config.maxBatchChars,
+        rateLimit: config.rateLimit,
       });
     case "mock":
       return new MockService({

@@ -59,6 +59,7 @@ const credentials: Record<string, readonly ServiceI18nKey[]> = {
   google: [],
   mymemory: ["apiKey"],
   deeplx: ["baseUrl"],
+  cloud: ["apiKey", "baseUrl"],
   "custom-http": [
     "baseUrl",
     "method",
@@ -226,11 +227,15 @@ export function serviceFields(
       ]
     : [
         ...(credentials[serviceId] ?? []),
-        ...(["google", "youdao-free", "deeplx", "custom-http"].includes(serviceId)
-          ? transportFields.filter(
-              (name) => !(credentials[serviceId] ?? []).includes(name),
-            )
-          : []),
+        ...(
+          ["google", "youdao-free", "deeplx", "custom-http", "cloud"].includes(
+            serviceId,
+          )
+            ? transportFields.filter(
+                (name) => !(credentials[serviceId] ?? []).includes(name),
+              )
+            : []
+        ),
       ];
   return names.map((name) => ({
     name,

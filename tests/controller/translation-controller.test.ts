@@ -578,7 +578,8 @@ describe("TranslationController", () => {
   it("translates pre-like blocks line by line and restores whitespace", async () => {
     const advanced = Object.assign(config(), {
       translateToPageEndImmediately: true,
-      immediateTranslationConcurrency: 2,
+      translationIntegrityMode: false,
+      secondaryService: "transmart",
     }) as AdvancedPageConfig;
     const rule = {
       ...generalRule,

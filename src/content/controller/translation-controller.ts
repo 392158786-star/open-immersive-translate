@@ -1110,12 +1110,13 @@ export class TranslationController implements PageControllerActions {
     const pending = paragraphIds.filter(
       (id) =>
         this.paragraphs.has(id) &&
-        !this.renderedIds.has(id) &&
         !this.secondaryAttempted.has(id),
     );
     if (!pending.length) return false;
     for (const id of pending) this.secondaryAttempted.add(id);
     for (const id of pending) {
+      // 放弃时可能已把它标记成已渲染，次级服务要能重新翻译这一段。
+      this.renderedIds.delete(id);
       this.pendingIds.delete(id);
       this.errorIds.delete(id);
       this.retryAttempts.delete(id);

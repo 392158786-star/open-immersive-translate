@@ -361,6 +361,9 @@ function ensureSourceMarkers(state: RenderState): void {
     if (node.nodeType === Node.ELEMENT_NODE) {
       const element = node as Element;
       if (isInteractiveElement(element)) {
+        for (const text of textNodesInside(element)) {
+          wrapSourceText(state, text);
+        }
         continue;
       }
       state.sourceElements.push({

@@ -721,7 +721,7 @@ describe("renderTranslation", () => {
     ).toBe(true);
   });
 
-  it("never hides anchors in mixed inline paragraphs", () => {
+  it("hides inline link labels in translation-only mode without removing links", () => {
     document.body.innerHTML =
       '<p>Read the <a href="/guide">JavaScript Guide</a> first.</p>';
     const container = document.querySelector("p")!;
@@ -737,6 +737,14 @@ describe("renderTranslation", () => {
     expect(link.classList.contains("imt-source-hidden")).toBe(false);
     expect(link.getAttribute("href")).toBe("/guide");
     expect(link.textContent).toBe("JavaScript Guide");
+    expect(
+      link
+        .querySelector<HTMLElement>('[data-imt="source"]')
+        ?.classList.contains("imt-source-hidden"),
+    ).toBe(true);
+    expect(container.querySelector('[data-imt="target"]')?.textContent).toBe(
+      "先阅读指南。",
+    );
   });
 
   it("honors explicit block and inline prefixes", () => {

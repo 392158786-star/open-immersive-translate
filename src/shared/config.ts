@@ -14,7 +14,7 @@ import { DEFAULT_SUBTITLE_CONFIG, type SubtitleConfig } from "./subtitle-types";
 import type { Config, ConfigPatch, Rule, ServiceConfig } from "./types";
 
 /** Current persisted configuration format. */
-export const CONFIG_VERSION = 13;
+export const CONFIG_VERSION = 14;
 
 /** Storage key containing the complete configuration object. */
 export const CONFIG_STORAGE_KEY = "config";
@@ -278,6 +278,7 @@ export const configSchema: z.ZodType<Config> = z.object({
   theme: z.string().default("underline"),
   font: z.string().optional(),
   service: z.string().default("transmart"),
+  secondaryService: z.string().default("cloud"),
   services: z.record(z.string(), serviceConfigSchema).default(DEFAULT_SERVICES),
   shortcuts: z.record(z.string(), z.string()).default(DEFAULT_SHORTCUTS),
   alwaysTranslateSites: z.array(z.string()).default([]),
@@ -822,6 +823,12 @@ registerConfigMigration(12, (config) => {
     },
   };
 });
+
+registerConfigMigration(13, (config) => ({
+  ...config,
+  version: 14,
+  secondaryService: "cloud",
+}));
 
 /** Upgrade unknown stored data and validate it as the current configuration. */
 export function migrateConfig(value: unknown): Config {

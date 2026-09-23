@@ -431,7 +431,8 @@ describe("TranslationController", () => {
     document.body.innerHTML = `<article><p>${source}</p></article>`;
     const advanced = Object.assign(config(), {
       translateToPageEndImmediately: true,
-      translationMode: "dual",
+      translationIntegrityMode: false,
+      secondaryService: "transmart",
     }) as AdvancedPageConfig;
     const controller = new TranslationController(advanced, {
       ...generalRule,
@@ -692,11 +693,14 @@ describe("TranslationController", () => {
     expect(document.querySelector("p")?.textContent).toBe(source);
 
     await vi.advanceTimersByTimeAsync(10_000);
-    expect(requests()).toHaveLength(4);
+    expect(requests()).toHaveLength(5);
+    failLatestRequest();
+    await vi.advanceTimersByTimeAsync(50);
+    expect(document.querySelector("p")?.textContent).toBe(source);
     await (
       controller as unknown as { rescan(): Promise<void> }
     ).rescan();
-    expect(requests()).toHaveLength(4);
+    expect(requests()).toHaveLength(5);
     controller.destroy();
   });
 
@@ -708,6 +712,7 @@ describe("TranslationController", () => {
     const advanced = Object.assign(config(), {
       translateToPageEndImmediately: true,
       translationIntegrityMode: true,
+      secondaryService: "transmart",
     }) as AdvancedPageConfig;
     const controller = new TranslationController(advanced, {
       ...generalRule,
@@ -952,6 +957,310 @@ describe("TranslationController", () => {
     expect(
       document.querySelector('[data-imt="target"]')?.textContent,
     ).toBe(expected);
+    controller.destroy();
+  });
+
+  it("triggers secondary service for paragraphs left unrendered after primary pass", async () => {
+    vi.useFakeTimers();
+    document.body.innerHTML =
+      "<article><p>First paragraph to translate.</p><p>Second paragraph to translate.</p></article>";
+    const cfg = Object.assign(config(), {
+      translateToPageEndImmediately: true,
+      translationIntegrityMode: false,
+      secondaryService: "cloud",
+      services: {
+        ...DEFAULT_CONFIG.services,
+        transmart: { ...DEFAULT_CONFIG.services.transmart, enabled: true },
+        cloud: { ...DEFAULT_CONFIG.services.cloud, enabled: true },
+        "local-model": {
+          ...DEFAULT_CONFIG.services["local-model"],
+          enabled: true,
+        },
+      },
+    }) as AdvancedPageConfig;
+    const controller = new TranslationController(cfg, {
+      ...generalRule,
+      isTranslateTitle: false,
+    });
+    controller.start("whole");
+    await vi.advanceTimersByTimeAsync(150);
+
+    const translateRequests = (): Array<{
+      requestId: string;
+      service?: string;
+      paragraphs: Array<{ id: string }>;
+    }> =>
+      portPosts.filter(
+        (
+          item,
+        ): item is {
+          type: "translate";
+          requestId: string;
+          service?: string;
+          paragraphs: Array<{ id: string }>;
+        } => (item as { type?: string }).type === "translate",
+      );
+
+    const primaryReq = translateRequests().at(-1);
+    expect(primaryReq).toBeDefined();
+    expect(primaryReq?.service).toBe("transmart");
+    const [id1, id2] = primaryReq!.paragraphs.map((p) => p.id);
+
+    portListeners[0]?.({
+      type: "translateResult",
+      requestId: primaryReq?.requestId,
+      results: [
+        { id: id1, text: "第一段译文。" },
+        {
+          id: id2,
+          error: {
+            code: "NETWORK",
+            message: "primary failed",
+            retryable: true,
+            serviceId: "transmart",
+          },
+        },
+      ],
+      done: true,
+    });
+    await vi.advanceTimersByTimeAsync(50);
+
+    const targetsAfterPrimary = document.querySelectorAll(
+      '[data-imt="target"]',
+    );
+    expect(targetsAfterPrimary).toHaveLength(1);
+    expect(targetsAfterPrimary[0]?.textContent).toBe("第一段译文。");
+
+    for (let i = 0; i < 3; i++) {
+      await vi.advanceTimersByTimeAsync(2_000);
+      const retryReq = translateRequests().at(-1);
+      expect(retryReq).toBeDefined();
+      portListeners[0]?.({
+        type: "translateResult",
+        requestId: retryReq?.requestId,
+        results: retryReq!.paragraphs.map(({ id }) => ({
+          id,
+          error: {
+            code: "NETWORK",
+            message: "retry failed",
+            retryable: true,
+            serviceId: "transmart",
+          },
+        })),
+        done: true,
+      });
+      await vi.advanceTimersByTimeAsync(50);
+    }
+
+    const secondaryReq = translateRequests().at(-1);
+    expect(secondaryReq).toBeDefined();
+    expect(secondaryReq?.service).toBe("cloud");
+
+    portListeners[0]?.({
+      type: "translateResult",
+      requestId: secondaryReq?.requestId,
+      results: secondaryReq!.paragraphs.map(({ id }) => ({
+        id,
+        text: "第二段译文。",
+      })),
+      done: true,
+    });
+    await vi.advanceTimersByTimeAsync(50);
+
+    const targets = document.querySelectorAll('[data-imt="target"]');
+    expect(targets).toHaveLength(2);
+    expect(targets[0]?.textContent).toBe("第一段译文。");
+    expect(targets[1]?.textContent).toBe("第二段译文。");
+    controller.destroy();
+  });
+
+  it("falls back to local-model when cloud is not enabled", async () => {
+    vi.useFakeTimers();
+    document.body.innerHTML =
+      "<article><p>A paragraph that will fail on primary.</p></article>";
+    const cfg = Object.assign(config(), {
+      translateToPageEndImmediately: true,
+      translationIntegrityMode: false,
+      secondaryService: "cloud",
+      services: {
+        ...DEFAULT_CONFIG.services,
+        transmart: { ...DEFAULT_CONFIG.services.transmart, enabled: true },
+        cloud: { ...DEFAULT_CONFIG.services.cloud, enabled: false },
+        "local-model": {
+          ...DEFAULT_CONFIG.services["local-model"],
+          enabled: true,
+        },
+      },
+    }) as AdvancedPageConfig;
+    const controller = new TranslationController(cfg, {
+      ...generalRule,
+      isTranslateTitle: false,
+    });
+    controller.start("whole");
+    await vi.advanceTimersByTimeAsync(150);
+
+    const translateRequests = (): Array<{
+      requestId: string;
+      service?: string;
+      paragraphs: Array<{ id: string }>;
+    }> =>
+      portPosts.filter(
+        (
+          item,
+        ): item is {
+          type: "translate";
+          requestId: string;
+          service?: string;
+          paragraphs: Array<{ id: string }>;
+        } => (item as { type?: string }).type === "translate",
+      );
+
+    const failLatest = (): void => {
+      const req = translateRequests().at(-1);
+      if (!req) return;
+      portListeners[0]?.({
+        type: "translateResult",
+        requestId: req.requestId,
+        results: req.paragraphs.map(({ id }) => ({
+          id,
+          error: {
+            code: "NETWORK",
+            message: "fail",
+            retryable: true,
+            serviceId: "transmart",
+          },
+        })),
+        done: true,
+      });
+    };
+
+    failLatest();
+    await vi.advanceTimersByTimeAsync(50);
+
+    for (let i = 0; i < 3; i++) {
+      await vi.advanceTimersByTimeAsync(2_000);
+      failLatest();
+      await vi.advanceTimersByTimeAsync(50);
+    }
+
+    const secondaryReq = translateRequests().at(-1);
+    expect(secondaryReq?.service).toBe("local-model");
+    controller.destroy();
+  });
+
+  it("renders all paragraphs after secondary pass succeeds", async () => {
+    vi.useFakeTimers();
+    document.body.innerHTML =
+      "<article><p>First sentence here.</p><p>Second sentence here.</p><p>Third sentence here.</p></article>";
+    const cfg = Object.assign(config(), {
+      translateToPageEndImmediately: true,
+      translationIntegrityMode: false,
+      secondaryService: "cloud",
+      services: {
+        ...DEFAULT_CONFIG.services,
+        transmart: { ...DEFAULT_CONFIG.services.transmart, enabled: true },
+        cloud: { ...DEFAULT_CONFIG.services.cloud, enabled: true },
+        "local-model": {
+          ...DEFAULT_CONFIG.services["local-model"],
+          enabled: true,
+        },
+      },
+    }) as AdvancedPageConfig;
+    const controller = new TranslationController(cfg, {
+      ...generalRule,
+      isTranslateTitle: false,
+    });
+    controller.start("whole");
+    await vi.advanceTimersByTimeAsync(150);
+
+    const translateRequests = (): Array<{
+      requestId: string;
+      service?: string;
+      paragraphs: Array<{ id: string }>;
+    }> =>
+      portPosts.filter(
+        (
+          item,
+        ): item is {
+          type: "translate";
+          requestId: string;
+          service?: string;
+          paragraphs: Array<{ id: string }>;
+        } => (item as { type?: string }).type === "translate",
+      );
+
+    const primaryReq = translateRequests().at(-1);
+    const [idA, idB, idC] = primaryReq!.paragraphs.map((p) => p.id);
+    portListeners[0]?.({
+      type: "translateResult",
+      requestId: primaryReq?.requestId,
+      results: [
+        { id: idA, text: "第一句。" },
+        {
+          id: idB,
+          error: {
+            code: "NETWORK",
+            message: "fail",
+            retryable: true,
+            serviceId: "transmart",
+          },
+        },
+        {
+          id: idC,
+          error: {
+            code: "NETWORK",
+            message: "fail",
+            retryable: true,
+            serviceId: "transmart",
+          },
+        },
+      ],
+      done: true,
+    });
+    await vi.advanceTimersByTimeAsync(50);
+
+    for (let i = 0; i < 3; i++) {
+      await vi.advanceTimersByTimeAsync(2_000);
+      const retryReq = translateRequests().at(-1);
+      expect(retryReq).toBeDefined();
+      portListeners[0]?.({
+        type: "translateResult",
+        requestId: retryReq?.requestId,
+        results: retryReq!.paragraphs.map(({ id }) => ({
+          id,
+          error: {
+            code: "NETWORK",
+            message: "retry failed",
+            retryable: true,
+            serviceId: "transmart",
+          },
+        })),
+        done: true,
+      });
+      await vi.advanceTimersByTimeAsync(50);
+    }
+
+    const secondaryReq = translateRequests().at(-1);
+    expect(secondaryReq?.service).toBe("cloud");
+    const secondaryIds = secondaryReq!.paragraphs.map((p) => p.id).sort();
+    expect(secondaryIds).toEqual([idB, idC].sort());
+
+    portListeners[0]?.({
+      type: "translateResult",
+      requestId: secondaryReq?.requestId,
+      results: [
+        { id: idB, text: "第二句。" },
+        { id: idC, text: "第三句。" },
+      ],
+      done: true,
+    });
+    await vi.advanceTimersByTimeAsync(50);
+
+    const targets = document.querySelectorAll('[data-imt="target"]');
+    expect(targets).toHaveLength(3);
+    expect(targets[0]?.textContent).toBe("第一句。");
+    expect(targets[1]?.textContent).toBe("第二句。");
+    expect(targets[2]?.textContent).toBe("第三句。");
     controller.destroy();
   });
 });

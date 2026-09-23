@@ -349,6 +349,7 @@ export interface Config {
   theme: string;
   font?: string;
   service: string;
+  secondaryService: string;
   services: Record<string, ServiceConfig>;
   shortcuts: Record<string, string>;
   alwaysTranslateSites: string[];

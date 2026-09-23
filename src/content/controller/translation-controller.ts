@@ -151,6 +151,11 @@ export class TranslationController implements PageControllerActions {
   private readonly plainFallbackAttempted = new WeakSet<Element>();
   private readonly retryAttempts = new Map<string, number>();
   private readonly retryTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  private readonly retryBatchIds = new Set<string>();
+  private retryBatchTimer?: ReturnType<typeof setTimeout>;
+  private readonly secondaryAttempted = new Set<string>();
+  private readonly secondaryBatchIds = new Set<string>();
+  private secondaryBatchTimer?: ReturnType<typeof setTimeout>;
   private readonly deferredResults: ParagraphTranslationResult[] = [];
   /** 仅中文模式下被隐藏原文的段落，切回原文/双语时需要恢复。 */
   private readonly hiddenSources = new Set<Element>();
@@ -412,6 +417,16 @@ export class TranslationController implements PageControllerActions {
       clearTimeout(this.renderFlushTimer);
       this.renderFlushTimer = undefined;
     }
+    if (this.retryBatchTimer !== undefined) {
+      clearTimeout(this.retryBatchTimer);
+      this.retryBatchTimer = undefined;
+    }
+    if (this.secondaryBatchTimer !== undefined) {
+      clearTimeout(this.secondaryBatchTimer);
+      this.secondaryBatchTimer = undefined;
+    }
+    this.retryBatchIds.clear();
+    this.secondaryBatchIds.clear();
     this.scrollActive = false;
     this.pendingIds.clear();
     this.renderedIds.clear();
@@ -532,6 +547,15 @@ export class TranslationController implements PageControllerActions {
     for (const timer of this.retryTimers.values()) clearTimeout(timer);
     this.retryTimers.clear();
     this.retryAttempts.clear();
+    if (this.retryBatchTimer !== undefined) clearTimeout(this.retryBatchTimer);
+    this.retryBatchTimer = undefined;
+    this.retryBatchIds.clear();
+    if (this.secondaryBatchTimer !== undefined) {
+      clearTimeout(this.secondaryBatchTimer);
+    }
+    this.secondaryBatchTimer = undefined;
+    this.secondaryBatchIds.clear();
+    this.secondaryAttempted.clear();
   }
 
   private installScrollTranslation(): void {
@@ -912,34 +936,6 @@ export class TranslationController implements PageControllerActions {
     ]).then(() => undefined);
   }
 
-  private async translateParagraphIds(
-    ids: readonly string[],
-    priority: TranslationPriority,
-  ): Promise<void> {
-    const paragraphs = ids.flatMap((id) => {
-      const paragraph = this.paragraphs.get(id);
-      return paragraph &&
-        !this.pendingIds.has(id) &&
-        !this.renderedIds.has(id) &&
-        this.isParagraphAllowed(paragraph)
-        ? [paragraph]
-        : [];
-    });
-    if (!paragraphs.length) return;
-    const preformatted = paragraphs.filter(
-      (paragraph) => paragraph.preformatted,
-    );
-    const regular = paragraphs.filter((paragraph) => !paragraph.preformatted);
-    await Promise.all([
-      regular.length
-        ? this.requestParagraphs(regular, priority)
-        : Promise.resolve(),
-      ...preformatted.map((paragraph) =>
-        this.translatePreformatted(paragraph, priority),
-      ),
-    ]);
-  }
-
   private isParagraphAllowed(paragraph: AdvancedParagraph): boolean {
     const selectors = this.rule.selectors;
     if (!selectors?.length) return true;
@@ -999,6 +995,7 @@ export class TranslationController implements PageControllerActions {
   private requestParagraphs(
     paragraphs: readonly AdvancedParagraph[],
     priority: TranslationPriority,
+    serviceOverride?: string,
   ): Promise<void> {
     const requestParagraphs: TranslatePortMessage["paragraphs"] = [];
     for (const paragraph of paragraphs) {
@@ -1063,7 +1060,11 @@ export class TranslationController implements PageControllerActions {
       paragraphs: requestParagraphs,
       from: this.config.sourceLanguage,
       to: this.config.targetLanguage,
-      service: this.runtimeService ?? this.rule.service ?? this.config.service,
+      service:
+        serviceOverride ??
+        this.runtimeService ??
+        this.rule.service ??
+        this.config.service,
       glossary: this.glossary(),
       context: this.context(),
       priority,
@@ -1083,6 +1084,115 @@ export class TranslationController implements PageControllerActions {
       });
       this.post(message);
     });
+  }
+
+  private resolveSecondaryService(): string | undefined {
+    if (this.config.secondaryService === this.config.service) return undefined;
+    const preferred = this.config.secondaryService;
+    const services = this.config.services;
+    if (
+      preferred &&
+      services[preferred] &&
+      services[preferred].enabled !== false
+    ) {
+      return preferred;
+    }
+    const fallback = "local-model";
+    if (services[fallback] && services[fallback].enabled !== false) {
+      return fallback;
+    }
+    return undefined;
+  }
+
+  private trySecondaryService(paragraphIds: readonly string[]): boolean {
+    const secondaryId = this.resolveSecondaryService();
+    if (!secondaryId) return false;
+    const pending = paragraphIds.filter(
+      (id) =>
+        this.paragraphs.has(id) &&
+        !this.renderedIds.has(id) &&
+        !this.secondaryAttempted.has(id),
+    );
+    if (!pending.length) return false;
+    for (const id of pending) this.secondaryAttempted.add(id);
+    for (const id of pending) {
+      this.pendingIds.delete(id);
+      this.errorIds.delete(id);
+      this.retryAttempts.delete(id);
+      this.clearParagraphSegments(id);
+    }
+    void this.translateParagraphIds(pending, "interactive", secondaryId);
+    return true;
+  }
+
+  private queueSecondaryFallback(paragraphId: string): void {
+    if (this.secondaryAttempted.has(paragraphId)) return;
+    this.secondaryBatchIds.add(paragraphId);
+    if (this.secondaryBatchTimer !== undefined) return;
+    this.secondaryBatchTimer = setTimeout(() => {
+      this.secondaryBatchTimer = undefined;
+      const ids = [...this.secondaryBatchIds].filter(
+        (id) =>
+          this.active && this.paragraphs.has(id) && !this.renderedIds.has(id),
+      );
+      this.secondaryBatchIds.clear();
+      if (!ids.length) return;
+      if (this.trySecondaryService(ids)) return;
+      for (const id of ids) this.finalizeFailedParagraph(id);
+      this.emitState();
+    }, 0);
+  }
+
+  private finalizeFailedParagraph(paragraphId: string): void {
+    const paragraph = this.paragraphs.get(paragraphId);
+    if (!paragraph || this.renderedIds.has(paragraphId)) return;
+    removeTranslation(paragraph);
+    this.hideFailedSource(paragraph);
+    this.pendingIds.delete(paragraphId);
+    this.errorIds.delete(paragraphId);
+    markTranslated(paragraph.container, paragraphId);
+    this.renderedIds.add(paragraphId);
+  }
+
+  private flushRetryBatch(): void {
+    if (this.retryBatchTimer !== undefined) return;
+    this.retryBatchTimer = setTimeout(() => {
+      this.retryBatchTimer = undefined;
+      const ids = [...this.retryBatchIds].filter(
+        (id) => this.active && this.paragraphs.has(id),
+      );
+      this.retryBatchIds.clear();
+      if (ids.length) void this.translateParagraphIds(ids, "interactive");
+    }, 0);
+  }
+
+  private async translateParagraphIds(
+    ids: readonly string[],
+    priority: TranslationPriority,
+    serviceOverride?: string,
+  ): Promise<void> {
+    const paragraphs = ids.flatMap((id) => {
+      const paragraph = this.paragraphs.get(id);
+      return paragraph &&
+        !this.pendingIds.has(id) &&
+        !this.renderedIds.has(id) &&
+        this.isParagraphAllowed(paragraph)
+        ? [paragraph]
+        : [];
+    });
+    if (!paragraphs.length) return;
+    const preformatted = paragraphs.filter(
+      (paragraph) => paragraph.preformatted,
+    );
+    const regular = paragraphs.filter((paragraph) => !paragraph.preformatted);
+    await Promise.all([
+      regular.length
+        ? this.requestParagraphs(regular, priority, serviceOverride)
+        : Promise.resolve(),
+      ...preformatted.map((paragraph) =>
+        this.translatePreformatted(paragraph, priority),
+      ),
+    ]);
   }
 
   private async translatePreformatted(
@@ -1434,6 +1544,12 @@ export class TranslationController implements PageControllerActions {
 
   private scheduleAutomaticRetry(paragraph: AdvancedParagraph): void {
     if (this.retryTimers.has(paragraph.id)) return;
+    if (this.secondaryAttempted.has(paragraph.id)) {
+      this.retryAttempts.delete(paragraph.id);
+      this.finalizeFailedParagraph(paragraph.id);
+      this.emitState();
+      return;
+    }
     const previous = this.retryAttempts.get(paragraph.id) ?? 0;
     const attempt = previous + 1;
     // 完整性模式只是允许更多次重试，不能无限重试：只要段落永远失败，
@@ -1444,13 +1560,8 @@ export class TranslationController implements PageControllerActions {
       ? MAX_INTEGRITY_RETRIES
       : MAX_AUTOMATIC_RETRIES;
     if (attempt > maxAttempts) {
-      removeTranslation(paragraph);
-      this.hideFailedSource(paragraph);
-      this.pendingIds.delete(paragraph.id);
-      this.errorIds.delete(paragraph.id);
-      markTranslated(paragraph.container, paragraph.id);
-      this.renderedIds.add(paragraph.id);
       this.retryAttempts.delete(paragraph.id);
+      this.queueSecondaryFallback(paragraph.id);
       this.emitState();
       return;
     }
@@ -1471,7 +1582,8 @@ export class TranslationController implements PageControllerActions {
       }
       this.errorIds.delete(paragraph.id);
       this.pendingIds.delete(paragraph.id);
-      void this.translateParagraphIds([paragraph.id], "interactive");
+      this.retryBatchIds.add(paragraph.id);
+      this.flushRetryBatch();
     }, delay);
     this.retryTimers.set(paragraph.id, timer);
   }

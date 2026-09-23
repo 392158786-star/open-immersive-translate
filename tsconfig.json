@@ -19,5 +19,5 @@
     "jsxImportSource": "preact",
     "types": ["vite/client", "webextension-polyfill", "@crxjs/vite-plugin/client"]
   },
-  "include": ["src", "tests", "vite.config.ts", "vitest.config.ts"]
+  "include": ["src", "tests", "vite.config.ts", "vite.web-demo.config.ts", "vitest.config.ts"]
 }

@@ -1,0 +1,13 @@
+flowchart LR
+  A[CodeArts 分析需求] --> B[生成业务代码]
+  B --> C[运行类型检查、测试和构建]
+  C --> D{是否通过}
+  D -->|否| E[CodeArts 定位并修复问题]
+  E --> C
+  D -->|是| F[Commit 到比赛分支]
+  F --> G[Skills 创建 RDS 和 Redis]
+  G --> H[配置环境变量和安全组]
+  H --> I[auto-deploy 部署到华为云]
+  I --> J[健康检查与功能验证]
+  J --> K[保存截图和演示视频]
+  K --> L[创建比赛 Tag 和提交开源材料]

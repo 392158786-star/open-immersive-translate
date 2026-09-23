@@ -1,0 +1,12 @@
+flowchart LR
+  User[用户] --> Extension[浏览器扩展]
+  User --> Demo[可视化 Demo 页面]
+  Extension -->|可选云端请求| API[云端 API 服务]
+  Demo --> API
+  API --> Redis[(华为云 DCS Redis)]
+  API --> RDS[(华为云 RDS)]
+  API -->|缓存未命中| Translator[翻译服务]
+  Translator --> API
+  Redis -->|缓存命中| API
+  API --> Demo
+  Extension -->|云端不可用| Local[本地翻译回退]

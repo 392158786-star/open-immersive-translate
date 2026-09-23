@@ -1,3 +1,6 @@
+# 本地全栈开发环境：app + PostgreSQL + Redis
+# RDS_HOST / REDIS_HOST 被强制指向本地容器，仅用于本地开发。
+# 华为云 ECS 部署请使用 docker-compose.huawei.yml。
 services:
   app:
     build: .

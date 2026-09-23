@@ -1,6 +1,7 @@
 # ECS Docker Compose 部署指南
 
 华为云 ECS 上使用 Docker Compose 部署 cloud-demo 的操作手册。
+ECS 仅运行 app 容器，RDS/DCS 通过内网地址在 `.env` 中配置。
 
 ## 1. 前置条件
 
@@ -32,10 +33,10 @@
 
 ## 3. RDS / DCS 内网连接
 
-RDS 与 DCS 必须与 ECS 在同一 VPC，通过内网地址连接：
+RDS 与 DCS 必须与 ECS 在同一 VPC，通过内网地址连接。
+在 `cloud-demo/.env` 中配置内网地址，`docker-compose.huawei.yml` 不会覆盖这些变量：
 
 ```ini
-# .env 中配置内网地址
 RDS_HOST=192.168.x.x    # RDS 内网 IP
 RDS_PORT=5432
 RDS_DATABASE=cloud_demo
@@ -52,14 +53,11 @@ REDIS_PASSWORD=<dcs-password>
 
 ## 4. 数据库迁移
 
-首次部署或版本升级时执行迁移：
+首次部署或版本升级时，通过 RDS 内网地址直接执行迁移：
 
 ```bash
-# 方式一：容器启动时自动执行（docker-compose 已挂载 migrations 到 entrypoint）
-docker compose up -d postgres
-
-# 方式二：手动执行
-docker exec -i cloud-demo-postgres psql -U cloud_demo -d cloud_demo < db/migrations/001_init.sql
+# 使用 psql 客户端连接 RDS 内网
+psql -h 192.168.x.x -U cloud_demo -d cloud_demo -f db/migrations/001_init.sql
 ```
 
 ## 5. 启动
@@ -69,13 +67,14 @@ cd cloud-demo
 cp .env.example .env
 # 编辑 .env，填入 RDS/DCS 内网地址与密码、API_TOKEN
 
-docker compose up -d
-docker compose ps    # 确认三个容器均为 healthy
+docker compose -f docker-compose.huawei.yml up -d
+docker compose -f docker-compose.huawei.yml ps    # 确认 app 容器为 healthy
 ```
 
 Nginx 反向代理配置参见 `deploy/nginx.conf`，将 80 端口流量转发到 8787。
 
 ```bash
+# 在项目根目录执行（cloud-demo 的上一级）
 sudo cp deploy/nginx.conf /etc/nginx/sites-available/cloud-demo
 sudo ln -s /etc/nginx/sites-available/cloud-demo /etc/nginx/sites-enabled/
 sudo nginx -t && sudo systemctl reload nginx
@@ -85,7 +84,7 @@ sudo nginx -t && sudo systemctl reload nginx
 
 ```bash
 # 容器级
-docker compose ps
+docker compose -f docker-compose.huawei.yml ps
 
 # 应用级
 curl http://127.0.0.1:8787/health
@@ -104,21 +103,21 @@ docker images cloud-demo-app
 
 # 回滚到上一版本
 docker tag cloud-demo-app:<prev-tag> cloud-demo-app:latest
-docker compose up -d
+docker compose -f docker-compose.huawei.yml up -d
 
 # 数据库回滚（如有需要）
 # 1. 备份当前数据库
-docker exec cloud-demo-postgres pg_dump -U cloud_demo cloud_demo > backup.sql
+pg_dump -h 192.168.x.x -U cloud_demo cloud_demo > backup.sql
 # 2. 恢复到上一版本迁移
 # 3. 重启应用
-docker compose restart app
+docker compose -f docker-compose.huawei.yml restart app
 ```
 
 ## 8. 日志与排查
 
 ```bash
 # 查看应用日志
-docker compose logs -f app
+docker compose -f docker-compose.huawei.yml logs -f app
 
 # 查看 Nginx 日志
 sudo tail -f /var/log/nginx/access.log

@@ -20,7 +20,7 @@ node src/server.ts
 
 服务默认监听 `http://0.0.0.0:8787`，健康检查 `GET /health`。
 
-### Docker Compose
+### Docker Compose（本地全栈）
 
 ```bash
 cp .env.example .env
@@ -28,7 +28,19 @@ docker compose up -d
 ```
 
 启动 app + PostgreSQL + Redis 三个容器，含健康检查与持久化卷。
+`RDS_HOST` / `REDIS_HOST` 被强制指向本地容器，仅用于本地开发。
 PostgreSQL 初始化脚本从 `db/migrations/` 自动加载。
+
+### Docker Compose（华为云 ECS）
+
+```bash
+cp .env.example .env
+# 编辑 .env，填入 RDS/DCS 内网地址
+docker compose -f docker-compose.huawei.yml up -d
+```
+
+仅启动 app 容器，RDS/DCS 地址从 `.env` 读取，不覆盖 `RDS_HOST` / `REDIS_HOST`。
+详见 `../deploy/ecs-compose.md`。
 
 ## API 端点
 

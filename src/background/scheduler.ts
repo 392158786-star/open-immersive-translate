@@ -27,6 +27,10 @@ import {
 import { createService, getService } from "./services";
 
 const RETRY_DELAY_MS = 250;
+const RATE_LIMIT_MAX_RETRIES = 3;
+const RATE_LIMIT_BACKOFF_BASE_MS = 500;
+const RATE_LIMIT_BACKOFF_MAX_MS = 2_000;
+const RATE_LIMIT_MAX_TOTAL_DELAY_MS = 10_000;
 
 export interface SchedulerParagraph extends Omit<
   TranslateParagraph,
@@ -99,12 +103,41 @@ class ServiceQueue {
   private readonly normal: QueueJob<unknown>[] = [];
   private active = 0;
   private nextStartAt = 0;
+  private effectiveConcurrency: number;
+  private effectiveRps: number;
 
   constructor(
     private readonly serviceId: string,
     private readonly concurrency: number,
     private readonly rps: number,
-  ) {}
+  ) {
+    this.effectiveConcurrency = concurrency;
+    this.effectiveRps = rps;
+  }
+
+  reduceSpeed(): void {
+    this.effectiveConcurrency = Math.max(1, Math.floor(this.effectiveConcurrency / 2));
+    this.effectiveRps = Math.max(0.5, this.effectiveRps / 2);
+    console.debug(
+      `[scheduler] ${this.serviceId} speed reduced to rps=${this.effectiveRps.toFixed(1)} concurrency=${this.effectiveConcurrency}`,
+    );
+  }
+
+  restoreSpeed(): void {
+    if (
+      this.effectiveConcurrency < this.concurrency ||
+      this.effectiveRps < this.rps
+    ) {
+      this.effectiveConcurrency = Math.min(
+        this.concurrency,
+        this.effectiveConcurrency + 1,
+      );
+      this.effectiveRps = Math.min(this.rps, this.effectiveRps + 1);
+      console.debug(
+        `[scheduler] ${this.serviceId} speed restored to rps=${this.effectiveRps.toFixed(1)} concurrency=${this.effectiveConcurrency}`,
+      );
+    }
+  }
 
   enqueue<T>(
     run: () => Promise<T>,
@@ -138,7 +171,7 @@ class ServiceQueue {
 
   private pump(): void {
     while (
-      this.active < Math.max(1, this.concurrency) &&
+      this.active < Math.max(1, this.effectiveConcurrency) &&
       (this.high.length || this.normal.length)
     ) {
       const job = (this.high.shift() ??
@@ -153,7 +186,7 @@ class ServiceQueue {
   private async run(job: QueueJob<unknown>): Promise<void> {
     try {
       if (job.signal.aborted) throw cancellationError(this.serviceId);
-      const interval = 1000 / Math.max(this.rps, 0.001);
+      const interval = 1000 / Math.max(this.effectiveRps, 0.001);
       const startAt = Math.max(Date.now(), this.nextStartAt);
       this.nextStartAt = startAt + interval;
       const wait = startAt - Date.now();
@@ -673,20 +706,77 @@ export class TranslationScheduler {
     };
 
     const first = await call(texts);
-    const retryIndexes = first
-      .map((value, index) =>
-        value.error && isRetryable(value.error) ? index : -1,
-      )
-      .filter((index) => index >= 0);
-    if (!retryIndexes.length) return first;
+    let current = first;
 
-    await abortableDelay(RETRY_DELAY_MS, signal);
-    const retried = await call(retryIndexes.map((index) => texts[index]));
-    const merged = [...first];
-    retryIndexes.forEach((originalIndex, retryIndex) => {
-      merged[originalIndex] = retried[retryIndex];
-    });
-    return merged;
+    const retryIndexes = () =>
+      current
+        .map((value, index) =>
+          value.error && isRetryable(value.error) ? index : -1,
+        )
+        .filter((index) => index >= 0);
+
+    const isRateLimitError = (): boolean =>
+      current.some((value) => {
+        return (
+          value.error instanceof TranslateError &&
+          value.error.kind === "rate_limit"
+        );
+      });
+
+    if (isRateLimitError()) {
+      let attempt = 0;
+      let totalDelayMs = 0;
+      while (attempt < RATE_LIMIT_MAX_RETRIES) {
+        const pending = retryIndexes();
+        if (!pending.length) break;
+
+        const baseDelay = Math.min(
+          RATE_LIMIT_BACKOFF_BASE_MS * 2 ** attempt,
+          RATE_LIMIT_BACKOFF_MAX_MS,
+        );
+        const jitter = Math.random() * baseDelay * 0.25;
+        const delay = Math.round(baseDelay + jitter);
+        if (totalDelayMs + delay > RATE_LIMIT_MAX_TOTAL_DELAY_MS) {
+          console.debug(
+            `[scheduler] ${service.id} rate-limit retry budget exhausted (${totalDelayMs}ms spent)`,
+          );
+          break;
+        }
+        totalDelayMs += delay;
+        console.debug(
+          `[scheduler] ${service.id} rate-limited, backing off ${delay}ms (attempt ${attempt + 1}/${RATE_LIMIT_MAX_RETRIES})`,
+        );
+        this.queueFor(service).reduceSpeed();
+
+        await abortableDelay(delay, signal);
+
+        const retried = await call(pending.map((index) => texts[index]));
+        const merged = [...current];
+        pending.forEach((originalIndex, retryIndex) => {
+          merged[originalIndex] = retried[retryIndex];
+        });
+        current = merged;
+        attempt += 1;
+      }
+    } else if (retryIndexes().length) {
+      await abortableDelay(RETRY_DELAY_MS, signal);
+      const pending = retryIndexes();
+      const retried = await call(pending.map((index) => texts[index]));
+      const merged = [...current];
+      pending.forEach((originalIndex, retryIndex) => {
+        merged[originalIndex] = retried[retryIndex];
+      });
+      current = merged;
+    }
+
+    const stillFailing = current.some(
+      (value) => value.error && isRetryable(value.error),
+    );
+    if (!stillFailing) {
+      this.queueFor(service).restoreSpeed();
+    }
+
+    return current;
   }
 
   private async resolveServices(

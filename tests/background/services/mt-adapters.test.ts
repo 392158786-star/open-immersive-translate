@@ -161,6 +161,37 @@ describe("official machine translation adapters", () => {
     expect(result.texts).toEqual(["First paragraph.", "Second paragraph."]);
   });
 
+  it("maps Youdao 411 to rate_limit with retryable=true", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      json({
+        errorCode: "411",
+        translation: [],
+        msg: "请求频率过快",
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      new YoudaoFreeService().translate({
+        texts: ["hello"],
+        from: "en",
+        to: "zh-CN",
+      }, signal()),
+    ).rejects.toMatchObject({
+      kind: "rate_limit",
+      code: "RATE_LIMIT",
+      retryable: true,
+    });
+  });
+
+  it("has conservative default rate limits for free endpoint", () => {
+    const service = new YoudaoFreeService();
+    expect(service.rateLimit.rps).toBe(3);
+    expect(service.rateLimit.concurrency).toBe(1);
+    expect(service.limited).toBe(true);
+    expect(service.limitation).toContain("frequency");
+  });
+
   it("rejects Youdao output that drops protected inline placeholders", async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       json({

@@ -52,7 +52,7 @@ function missingPlaceholders(source: string, translation: string): string[] {
 export class YoudaoFreeService extends BaseService {
   readonly limited = true;
   readonly limitation =
-    "Public web demo endpoint; availability and quotas are not guaranteed.";
+    "Public web demo endpoint; availability and quotas are not guaranteed. Free interface has frequency limits; large pages may be slow.";
   private readonly baseUrl: string;
   private readonly timeoutMs: number;
 
@@ -63,8 +63,8 @@ export class YoudaoFreeService extends BaseService {
       maxBatchSize: options.maxBatchSize ?? 1,
       maxBatchChars: options.maxBatchChars ?? 700,
       rateLimit: {
-        rps: options.rateLimit?.rps ?? 12,
-        concurrency: options.rateLimit?.concurrency ?? 6,
+        rps: options.rateLimit?.rps ?? 3,
+        concurrency: options.rateLimit?.concurrency ?? 1,
       },
       placeholder: { open: "<b>", close: "</b>" },
     });

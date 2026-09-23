@@ -152,6 +152,8 @@ export class TranslationController implements PageControllerActions {
   private readonly retryAttempts = new Map<string, number>();
   private readonly retryTimers = new Map<string, ReturnType<typeof setTimeout>>();
   private readonly deferredResults: ParagraphTranslationResult[] = [];
+  /** 仅中文模式下被隐藏原文的段落，切回原文/双语时需要恢复。 */
+  private readonly hiddenSources = new Set<Element>();
   private overrideStore = new TranslationOverrideStore(
     window.location.hostname,
   );
@@ -267,6 +269,7 @@ export class TranslationController implements PageControllerActions {
       patch: { translationMode: mode },
     }).catch(() => undefined);
     setRenderedMode(document, mode);
+    if (mode !== "translation") this.restoreHiddenSources();
   }
 
   toggleOnlyTranslation(): void {
@@ -404,6 +407,7 @@ export class TranslationController implements PageControllerActions {
     this.paragraphSegments.clear();
     this.segmentTargets.clear();
     this.deferredResults.length = 0;
+    this.restoreHiddenSources();
     if (this.renderFlushTimer !== undefined) {
       clearTimeout(this.renderFlushTimer);
       this.renderFlushTimer = undefined;
@@ -1305,6 +1309,21 @@ export class TranslationController implements PageControllerActions {
     ));
   }
 
+  /** 仅中文模式下放弃翻译的段落隐藏原文，避免页面残留英文。 */
+  private hideFailedSource(paragraph: AdvancedParagraph): void {
+    if (this.currentMode() !== "translation") return;
+    paragraph.container.classList.add("imt-source-hidden");
+    this.hiddenSources.add(paragraph.container);
+  }
+
+  /** 恢复被隐藏的原文（切回原文/双语或整体重置时调用）。 */
+  private restoreHiddenSources(): void {
+    for (const element of this.hiddenSources) {
+      element.classList.remove("imt-source-hidden");
+    }
+    this.hiddenSources.clear();
+  }
+
   /** 诊断快照：仅用于排查段落卡在 pending 的问题，不参与翻译流程。 */
   debugSnapshot(): Record<string, unknown> {
     return {
@@ -1335,6 +1354,7 @@ export class TranslationController implements PageControllerActions {
     if (result.error) {
       if (this.shouldSkipFailedTranslation(paragraph)) {
         removeTranslation(paragraph);
+        this.hideFailedSource(paragraph);
         this.pendingIds.delete(paragraph.id);
         this.errorIds.delete(paragraph.id);
         markTranslated(paragraph.container, paragraph.id);
@@ -1425,6 +1445,7 @@ export class TranslationController implements PageControllerActions {
       : MAX_AUTOMATIC_RETRIES;
     if (attempt > maxAttempts) {
       removeTranslation(paragraph);
+      this.hideFailedSource(paragraph);
       this.pendingIds.delete(paragraph.id);
       this.errorIds.delete(paragraph.id);
       markTranslated(paragraph.container, paragraph.id);

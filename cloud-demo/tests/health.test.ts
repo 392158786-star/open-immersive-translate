@@ -19,6 +19,41 @@ describe("GET /health", () => {
     expect(body.checks.api.status).toBe("up");
     expect(body.checks.rds.status).toBe("not_configured");
     expect(body.checks.redis.status).toBe("not_configured");
+    expect(body.checks.upstream.status).toBe("not_configured");
+    await app.close();
+  });
+
+  it("暴露上游翻译来源，便于可视化面板区分占位与真实模型", async () => {
+    const app = await buildServer(loadConfig(testEnv), {
+      probes: {
+        upstream: async () => ({
+          status: "up",
+          detail: "占位上游（UPSTREAM_KIND=mock）",
+        }),
+      },
+    });
+    const response = await app.inject({ method: "GET", url: "/health" });
+    const body = response.json();
+    expect(response.statusCode).toBe(200);
+    expect(body.status).toBe("ok");
+    expect(body.checks.upstream.status).toBe("up");
+    expect(body.checks.upstream.detail).toContain("UPSTREAM_KIND=mock");
+    await app.close();
+  });
+
+  it("上游探针失败时降级为 degraded", async () => {
+    const app = await buildServer(loadConfig(testEnv), {
+      probes: {
+        upstream: async () => {
+          throw new Error("upstream unreachable");
+        },
+      },
+    });
+    const response = await app.inject({ method: "GET", url: "/health" });
+    const body = response.json();
+    expect(body.status).toBe("degraded");
+    expect(body.checks.upstream.status).toBe("down");
+    expect(body.checks.upstream.detail).toContain("upstream unreachable");
     await app.close();
   });
 

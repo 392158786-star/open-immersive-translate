@@ -15,6 +15,7 @@ export interface ProbeResult {
 export interface HealthProbes {
   rds?: () => Promise<ProbeResult>;
   redis?: () => Promise<ProbeResult>;
+  upstream?: () => Promise<ProbeResult>;
 }
 
 export interface HealthReport {
@@ -26,6 +27,7 @@ export interface HealthReport {
     api: ProbeResult;
     rds: ProbeResult;
     redis: ProbeResult;
+    upstream: ProbeResult;
   };
 }
 
@@ -52,17 +54,21 @@ export function registerHealthRoute(
   probes: HealthProbes = {},
 ): void {
   app.get("/health", async (): Promise<HealthReport> => {
-    const [rds, redis] = await Promise.all([
+    const [rds, redis, upstream] = await Promise.all([
       runProbe(probes.rds),
       runProbe(probes.redis),
+      runProbe(probes.upstream),
     ]);
-    const degraded = rds.status === "down" || redis.status === "down";
+    const degraded =
+      rds.status === "down" ||
+      redis.status === "down" ||
+      upstream.status === "down";
     return {
       status: degraded ? "degraded" : "ok",
       service: SERVICE_NAME,
       version: SERVICE_VERSION,
       uptimeSeconds: Math.round(process.uptime()),
-      checks: { api: { status: "up" }, rds, redis },
+      checks: { api: { status: "up" }, rds, redis, upstream },
     };
   });
 }

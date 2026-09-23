@@ -34,7 +34,16 @@ export async function main(): Promise<void> {
     ttlSeconds: config.cacheTtlSeconds,
   });
 
-  const probes: HealthProbes = {};
+  const upstreamKind = config.upstream.kind;
+  const probes: HealthProbes = {
+    upstream: async () => ({
+      status: "up",
+      detail:
+        upstreamKind === "http"
+          ? "真实上游（UPSTREAM_KIND=http）"
+          : "占位上游（UPSTREAM_KIND=mock，译文带 [源->目标] 前缀）",
+    }),
+  };
   if (database !== undefined) {
     const db = database;
     probes.rds = async () => {

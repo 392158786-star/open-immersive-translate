@@ -18,7 +18,9 @@
     "build:safari": "vite build --config vite.safari.config.ts",
     "lint:firefox": "pnpm build:firefox && web-ext lint --source-dir dist-firefox",
     "build:userscript": "scripts/build-userscript.sh",
-    "build:web-demo": "vite build --config vite.web-demo.config.ts"
+    "build:web-demo": "vite build --config vite.web-demo.config.ts",
+    "test:e2e:web-demo": "playwright test --config playwright.web-demo.config.ts",
+    "verify": "pnpm typecheck && pnpm lint && pnpm test && pnpm build && pnpm build:web-demo"
   },
   "dependencies": {
     "@fontsource/noto-sans-sc": "^5.3.0",

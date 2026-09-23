@@ -1,5 +1,14 @@
 # 开源版沉浸式翻译
 
+## 华为云比赛版
+
+本项目参加华为云 CodeArts 代码智能体比赛，比赛版分支为 `competition/huawei-codearts`。
+
+- 比赛材料：[docs/competition/](docs/competition/)（项目概览、智能体使用记录、证据索引、实施日志）
+- 云端 API 与可视化 Demo：[cloud-demo/](cloud-demo/)（Fastify + PostgreSQL + Redis，独立包）
+- 部署配置：[deploy/](deploy/)（Nginx 反向代理、ECS Docker Compose 部署指南）
+- 实施日志：[docs/competition/06-implementation-log.md](docs/competition/06-implementation-log.md)（P1–P7 阶段记录）
+
 ## 这个项目是什么？
 
 这是一个可以直接安装到 Chrome、Edge 等浏览器中的开源双语翻译扩展。它会在不破坏原网页功能的前提下，把英文网页转换成“中英对照”或“仅中文”的阅读界面。

@@ -5,21 +5,21 @@
 | 证据编号 | 证明内容 | 截图或链接 | 操作时间 | 对应 Git 提交 |
 | --- | --- | --- | --- | --- |
 | E00 | 创建并发布比赛分支 | https://github.com/392158786-star/open-immersive-translate/tree/competition/huawei-codearts | 2026-09-23 | 待补充 |
-| E01 | CodeArts 已打开项目并识别比赛分支 | `evidence/01-codearts-project.png` | 待补充 | 待补充 |
-| E02 | CodeArts 完成需求理解和实施计划 | `evidence/02-codearts-plan.png` | 待补充 | 待补充 |
-| E03 | CodeArts 生成或修改业务代码 | `evidence/03-codearts-diff.png` | 待补充 | 待补充 |
-| E04 | CodeArts 修复问题并通过检查 | `evidence/04-codearts-validation.png` | 待补充 | 待补充 |
-| E05 | 使用 Skills 创建 RDS 与 Redis | `evidence/05-skills-rds-redis.png` | 待补充 | 待补充 |
-| E06 | RDS 实例运行正常 | `evidence/06-rds-console.png` | 待补充 | 待补充 |
-| E07 | Redis 实例运行正常 | `evidence/07-redis-console.png` | 待补充 | 待补充 |
-| E08 | 应用可以访问 RDS 与 Redis | `evidence/08-rds-redis-health.png` | 待补充 | 待补充 |
-| E09 | 应用成功部署到华为云 | `evidence/09-deployment.png` | 待补充 | 待补充 |
-| E10 | 可视化 Demo 可通过公网访问 | `evidence/10-public-demo.png` | 待补充 | 待补充 |
-| E11 | 健康检查全部通过 | `evidence/11-health-check.png` | 待补充 | 待补充 |
-| E12 | Redis 未命中、RDS 写入、再次命中 | `evidence/12-cache-flow.png` | 待补充 | 待补充 |
-| E13 | 测试、Lint、类型检查和构建通过 | `evidence/13-validation.png` | 待补充 | 待补充 |
-| E14 | 三分钟演示视频 | 待补充 | 待补充 | 待补充 |
-| E15 | 最终版本和 Tag | 待补充 | 待补充 | 待补充 |
+| E01 | CodeArts 已打开项目并识别比赛分支 | `evidence/01-codearts-project.png` | 2026-09-23 | 截图待补 |
+| E02 | CodeArts 完成需求理解和实施计划 | `evidence/02-codearts-plan.png` | 2026-09-23 | 截图待补 |
+| E03 | CodeArts 生成或修改业务代码 | `evidence/03-codearts-diff.png` | 2026-09-23 | `2b8475e` `982d1f2` `6e375fa` `6a1caae` `e16626f` `ed47f4e` `c3f4f38` `53ff407` 截图待补 |
+| E04 | CodeArts 修复问题并通过检查 | `evidence/04-codearts-validation.png` | 2026-09-23 | `85a7488` `47855c3` 截图待补 |
+| E05 | 使用 Skills 创建 RDS 与 Redis | `evidence/05-skills-rds-redis.png` | 待完成 | 待完成 |
+| E06 | RDS 实例运行正常 | `evidence/06-rds-console.png` | 待完成 | 待完成 |
+| E07 | Redis 实例运行正常 | `evidence/07-redis-console.png` | 待完成 | 待完成 |
+| E08 | 应用可以访问 RDS 与 Redis | `evidence/08-rds-redis-health.png` | 待完成 | 待完成 |
+| E09 | 应用成功部署到华为云 | `evidence/09-deployment.png` | 待完成 | 待完成 |
+| E10 | 可视化 Demo 可通过公网访问 | `evidence/10-public-demo.png` | 待完成 | 待完成 |
+| E11 | 健康检查全部通过 | `evidence/11-health-check.png` | 待完成 | 待完成 |
+| E12 | Redis 未命中、RDS 写入、再次命中 | `evidence/12-cache-flow.png` | 待完成 | 待完成 |
+| E13 | 测试、Lint、类型检查和构建通过 | `evidence/13-validation.png` | 2026-09-23 | `2b8475e` `982d1f2` `6e375fa` `6a1caae` `e16626f` `ed47f4e` `c3f4f38` `53ff407` `85a7488` `47855c3` 截图待补 |
+| E14 | 三分钟演示视频 | 待完成 | 待完成 | 待完成 |
+| E15 | 最终版本和 Tag | 待完成 | 待完成 | 待完成 |
 
 ## 记录规则
 

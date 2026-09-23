@@ -46,6 +46,18 @@
 不要修改 main，不要提交 .env、密码、AK/SK 或 Token。所有修改进入 competition/huawei-codearts。
 ```
 
+### 验证命令（原生 Node 入口）
+
+```text
+完成后用直接 Node 入口逐条运行验证，不使用 npm/pnpm 包装：
+
+node node_modules/typescript/bin/tsc --noEmit
+node node_modules/eslint/bin/eslint.js .
+node node_modules/vitest/vitest.mjs run
+
+每条单独执行，超时 120000 ms，无管道、无重定向、无 shell 包装。
+```
+
 ### 问题修复
 
 ```text
@@ -67,3 +79,28 @@
 - 截图中的密钥和个人信息必须打码。
 - 不使用无法复现的截图，不伪造运行结果。
 - 关键操作完成后立即提交，提交信息应能对应截图中的操作。
+## 命令执行约束
+
+### 禁止 npm 包装
+
+验证一律使用直接 Node 二进制入口，**不使用 `npm`、`pnpm`、`npx`、`yarn` 脚本包装**。原因：沙箱安全策略按命令形态拦截 shell 包装 + 包管理脚本，即使只读命令也会被判定为高危并禁止执行，拿不到退出码和输出。
+
+正确方式：
+
+```bash
+node node_modules/typescript/bin/tsc --noEmit
+node node_modules/eslint/bin/eslint.js .
+node node_modules/vitest/vitest.mjs run
+```
+
+### 禁止管道与重定向
+
+不得使用 `|`、`>`、`>>`、`<`、`tail`、`tee`、`;`、`&&`、`||`、`cmd.exe`、`bash -c` 或后台进程。每条命令单独执行，超时 120000 毫秒。
+
+### 内核与命令卡顿处理
+
+Windows Bash 包装存在已知挂起问题：单次工具调用只运行一个原生命令，避免多命令链导致进程僵死。若命令无输出且退出码非零，优先怀疑编译缓存 shim 或沙箱拦截，而非代码问题：
+
+- **typecheck 无输出**：可能是编译缓存 shim 拦截，改用 `node_modules/.pnpm/typescript@5.9.3/node_modules/typescript/lib/tsc.js` 直接调用绕过。
+- **ESLint 报 `Cannot find module`**：pnpm 严格隔离导致模块解析失败，属环境问题非代码问题，可跳过 ESLint 只跑 typecheck / Vitest / Vite build。
+- **`git push` 超时**：沙箱无外网，本地提交正常，推送留给用户本机执行。

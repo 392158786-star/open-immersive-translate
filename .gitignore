@@ -9,3 +9,11 @@ dist-userscript/
 .vite/
 playwright-report/
 test-results/
+# 云端 Demo（独立包）
+cloud-demo/node_modules/
+cloud-demo/coverage/
+cloud-demo/web/dist/
+cloud-demo/.env
+cloud-demo/.env.local
+.env
+.env.local

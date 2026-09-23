@@ -14,6 +14,7 @@ export default tseslint.config(
       "public/**",
       ".vite/**",
       ".edge-*/**",
+      "cloud-demo/**",
     ],
   },
   eslint.configs.recommended,

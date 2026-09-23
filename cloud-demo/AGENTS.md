@@ -5,11 +5,20 @@ Node's type stripping.
 
 ## Rules
 
-- Do not run terminal commands.
-- Do not run `npm install`, tests, typecheck, lint, build, or watch commands.
-- Do not commit or push.
+- Run terminal commands directly, one native command per tool call.
+- Do not use `cmd.exe`, `powershell`, `bash -c`, pipes, redirection, `tail`,
+  `tee`, `;`, `&&`, or `||`.
+- Do not run `npm install`, `npm ci`, watch mode, dev servers, or background
+  processes.
+- Validation commands are:
+  - `node node_modules/typescript/bin/tsc --noEmit`
+  - `node node_modules/eslint/bin/eslint.js .`
+  - `node node_modules/vitest/vitest.mjs run`
+- Do not use `npm` or `pnpm` for validation. Run the direct Node entry points.
+- Run each validation command separately with a 120-second timeout.
+- Do not commit or push unless explicitly requested.
 - Edit only files required by the current stage.
-- Report the validation commands for the user to run.
+- Fix failures only within the current stage.
 
 ## TypeScript Constraints
 

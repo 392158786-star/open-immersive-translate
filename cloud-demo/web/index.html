@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>云端翻译可视化工作台</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <header class="bench-header">
+      <h1>云端翻译可视化工作台</h1>
+      <div class="token-bar">
+        <label for="api-token">API Token</label>
+        <input
+          id="api-token"
+          type="password"
+          autocomplete="off"
+          placeholder="留空则不携带 Bearer Token"
+        />
+        <button id="save-token" type="button">保存到会话</button>
+        <span id="token-status" class="token-status">未保存</span>
+      </div>
+      <div class="health-bar">
+        <span class="health-pill" id="health-api">API: 未知</span>
+        <span class="health-pill" id="health-rds">RDS: 未知</span>
+        <span class="health-pill" id="health-redis">Redis: 未知</span>
+        <button id="refresh-health" type="button">刷新健康状态</button>
+      </div>
+    </header>
+
+    <main class="bench-grid">
+      <section class="panel panel-input">
+        <h2>翻译输入</h2>
+        <form id="translate-form">
+          <label for="source-text">源文本</label>
+          <textarea
+            id="source-text"
+            rows="4"
+            placeholder="输入需要翻译的文本"
+          ></textarea>
+
+          <div class="lang-row">
+            <label for="from-lang">源语言</label>
+            <input id="from-lang" type="text" value="en" />
+
+            <label for="to-lang">目标语言</label>
+            <input id="to-lang" type="text" value="zh" />
+          </div>
+
+          <label for="service-id">服务 ID（可选）</label>
+          <input id="service-id" type="text" placeholder="留空使用默认上游" />
+
+          <button id="translate-submit" type="submit">发送翻译请求</button>
+        </form>
+      </section>
+
+      <section class="panel panel-result">
+        <h2>翻译结果</h2>
+        <dl class="result-meta">
+          <dt>请求 ID</dt>
+          <dd id="result-request-id">—</dd>
+          <dt>译文</dt>
+          <dd id="result-target-text">—</dd>
+          <dt>缓存层</dt>
+          <dd id="result-cache-layer">—</dd>
+          <dt>延迟</dt>
+          <dd id="result-latency">—</dd>
+        </dl>
+      </section>
+
+      <section class="panel panel-cache">
+        <h2>缓存层与延迟</h2>
+        <dl class="cache-meta">
+          <dt>Redis 命中</dt>
+          <dd id="cache-redis-hits">—</dd>
+          <dt>RDS 命中</dt>
+          <dd id="cache-rds-hits">—</dd>
+          <dt>上游调用</dt>
+          <dd id="cache-upstream-requests">—</dd>
+          <dt>记忆条目</dt>
+          <dd id="cache-total-memory">—</dd>
+          <dt>累计命中</dt>
+          <dd id="cache-total-hits">—</dd>
+          <dt>累计请求</dt>
+          <dd id="cache-total-requests">—</dd>
+        </dl>
+        <button id="refresh-stats" type="button">刷新统计</button>
+      </section>
+
+      <section class="panel panel-requests">
+        <h2>调用记录</h2>
+        <div class="requests-toolbar">
+          <label for="requests-limit">条数</label>
+          <input id="requests-limit" type="number" min="1" max="100" value="20" />
+          <button id="refresh-requests" type="button">刷新记录</button>
+        </div>
+        <div class="requests-table-wrap">
+          <table id="requests-table">
+            <thead>
+              <tr>
+                <th>时间</th>
+                <th>请求 ID</th>
+                <th>源语言</th>
+                <th>目标语言</th>
+                <th>缓存层</th>
+                <th>延迟(ms)</th>
+                <th>状态</th>
+                <th>错误</th>
+              </tr>
+            </thead>
+            <tbody id="requests-tbody">
+              <tr><td colspan="8">暂无记录</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+
+    <footer class="bench-footer">
+      <span id="last-error" class="last-error"></span>
+      <span>同源调用 /health、/v1/translate、/v1/stats、/v1/requests</span>
+    </footer>
+
+    <script src="/app.js" defer></script>
+  </body>
+</html>

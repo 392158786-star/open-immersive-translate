@@ -5,6 +5,7 @@ import Fastify, {
 } from "fastify";
 import { createAuthenticateHook, isPublicPath } from "./auth.ts";
 import type { AppConfig } from "./config.ts";
+import { registerDemoRoute, isDemoPath } from "./routes/demo.ts";
 import { registerHealthRoute, type HealthProbes } from "./routes/health.ts";
 import { registerTranslateRoute } from "./routes/translate.ts";
 import { registerMemoryRoute } from "./routes/memory.ts";
@@ -48,10 +49,11 @@ export async function buildServer(
 
   const authenticate = createAuthenticateHook(config.apiToken);
   app.addHook("onRequest", async (request, reply) => {
-    if (isPublicPath(request.url)) return;
+    if (isPublicPath(request.url) || isDemoPath(request.url)) return;
     await authenticate(request, reply);
   });
 
+  registerDemoRoute(app);
   registerHealthRoute(app, services.probes ?? {});
 
   if (services.orchestrator !== undefined) {

@@ -9,6 +9,7 @@
   --imt-muted-color: #697386;
   --imt-divider-color: #c7cdd6;
   --imt-marker-color: rgb(255 224 92 / 55%);
+  --imt-error-color: #b42318;
 }
 
 .imt-translation-scroll-lock {
@@ -21,7 +22,11 @@
   font-family: var(--imt-target-font, inherit) !important;
   font-size: var(--imt-target-font-size, inherit) !important;
   line-height: var(--imt-target-line-height, inherit) !important;
+  max-width: 100% !important;
+  min-width: 0 !important;
+  overflow-wrap: anywhere !important;
   text-orientation: mixed !important;
+  white-space: normal !important;
   writing-mode: horizontal-tb !important;
 }
 
@@ -278,6 +283,19 @@
   margin-top: 0.5em !important;
 }
 
+.imt-target table {
+  max-width: 100% !important;
+  table-layout: auto !important;
+  width: 100% !important;
+}
+
+.imt-target th,
+.imt-target td {
+  min-width: 0 !important;
+  overflow-wrap: anywhere !important;
+  white-space: normal !important;
+}
+
 .imt-target.imt-target-replace .imt-pair-source-block {
   display: none !important;
 }
@@ -291,7 +309,7 @@
 }
 
 .imt-error {
-  color: #b42318 !important;
+  color: var(--imt-error-color) !important;
 }
 
 .imt-retry {
@@ -314,5 +332,7 @@
     --imt-muted-color: #aeb6c2;
     --imt-divider-color: #59616c;
     --imt-marker-color: rgb(196 152 0 / 55%);
+    --imt-target-color: #f5f7fa;
+    --imt-error-color: #f97066;
   }
 }

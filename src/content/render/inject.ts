@@ -203,6 +203,10 @@ function appendTarget(
     target.classList.add("imt-target-block");
     target.style.setProperty("display", "block", "important");
     target.style.setProperty("width", "100%", "important");
+    target.style.setProperty("max-width", "100%", "important");
+    target.style.setProperty("min-width", "0", "important");
+    target.style.setProperty("overflow-wrap", "anywhere", "important");
+    target.style.setProperty("white-space", "normal", "important");
     target.style.setProperty("margin-top", "0.2em", "important");
   } else {
     target.classList.remove("imt-target-block");

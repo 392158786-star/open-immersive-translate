@@ -68,6 +68,10 @@ describe("renderTranslation", () => {
 
     expect(container.childNodes[1]).toBe(target);
     expect(target.classList.contains("imt-target-block")).toBe(true);
+    expect(target.style.maxWidth).toBe("100%");
+    expect(target.style.minWidth).toBe("0");
+    expect(target.style.overflowWrap).toBe("anywhere");
+    expect(target.style.whiteSpace).toBe("normal");
     expect(target.outerHTML).toContain('data-imt="target"');
     expect(target.textContent).toBe("你好");
     expect(container.textContent).toBe("Hello你好");
@@ -901,7 +905,26 @@ describe("injectStyles", () => {
     expect(css).toContain("--imt-target-color");
     expect(css).toContain("--imt-target-font");
     expect(css).toContain("--imt-highlight-bg");
+    expect(css).toContain("--imt-error-color");
+    expect(css).toContain("max-width: 100% !important");
+    expect(css).toContain("overflow-wrap: anywhere !important");
+    expect(css).toContain(".imt-target table");
+    expect(css).toContain(".imt-target th");
     expect(css).toContain("@media (prefers-color-scheme: dark)");
+  });
+
+  it("injects the shared stylesheet into a shadow root", () => {
+    const host = document.createElement("div");
+    document.body.append(host);
+    const shadow = host.attachShadow({ mode: "open" });
+
+    injectStyles(shadow, [".shadow-rule { color: teal; }"]);
+
+    const style = shadow.querySelector<HTMLStyleElement>(
+      'style[data-imt="style"]',
+    );
+    expect(style).not.toBeNull();
+    expect(style?.textContent).toContain(".shadow-rule { color: teal; }");
   });
 
   it("uses an adopted stylesheet when constructable stylesheets are available", () => {

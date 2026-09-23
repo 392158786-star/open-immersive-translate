@@ -1,0 +1,57 @@
+services:
+  app:
+    build: .
+    container_name: cloud-demo-app
+    env_file: .env
+    environment:
+      - NODE_ENV=production
+      - RDS_HOST=postgres
+      - REDIS_HOST=redis
+    ports:
+      - "8787:8787"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8787/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
+    restart: unless-stopped
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: cloud-demo-postgres
+    environment:
+      - POSTGRES_DB=${RDS_DATABASE:-cloud_demo}
+      - POSTGRES_USER=${RDS_USER:-cloud_demo}
+      - POSTGRES_PASSWORD=${RDS_PASSWORD:-changeme}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./db/migrations:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${RDS_USER:-cloud_demo} -d ${RDS_DATABASE:-cloud_demo}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    container_name: cloud-demo-redis
+    command: redis-server --appendonly yes
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+volumes:
+  postgres-data:
+  redis-data:

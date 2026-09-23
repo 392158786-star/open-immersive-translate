@@ -1,0 +1,11 @@
+node_modules
+coverage
+.env
+.git
+.gitignore
+AGENTS.md
+*.md
+tests
+vitest.config.ts
+eslint.config.js
+tsconfig.json

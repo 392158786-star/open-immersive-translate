@@ -6,8 +6,27 @@ import Fastify, {
 import { createAuthenticateHook, isPublicPath } from "./auth.ts";
 import type { AppConfig } from "./config.ts";
 import { registerHealthRoute, type HealthProbes } from "./routes/health.ts";
+import { registerTranslateRoute } from "./routes/translate.ts";
+import { registerMemoryRoute } from "./routes/memory.ts";
+import { registerStatsRoute } from "./routes/stats.ts";
+import { registerRequestsRoute } from "./routes/requests.ts";
+import type { TranslationOrchestrator } from "./services/orchestrator.ts";
+import type {
+  MemoryStats,
+  TranslationMemory,
+  TranslationRequestRecord,
+} from "./services/memory-repo.ts";
 
-export interface BuildServerOptions {
+/** Read-only query surface for the memory and stats routes. */
+export interface MemoryQueryStore {
+  listMemory(limit?: number): Promise<readonly TranslationMemory[]>;
+  listRequests(limit?: number): Promise<readonly TranslationRequestRecord[]>;
+  getStats(): Promise<MemoryStats>;
+}
+
+export interface AppServices {
+  orchestrator?: TranslationOrchestrator;
+  memory?: MemoryQueryStore;
   probes?: HealthProbes;
 }
 
@@ -17,7 +36,7 @@ export interface BuildServerOptions {
  */
 export async function buildServer(
   config: AppConfig,
-  options: BuildServerOptions = {},
+  services: AppServices = {},
 ): Promise<FastifyInstance> {
   const app = Fastify({
     logger: config.logLevel === "silent" ? false : { level: config.logLevel },
@@ -33,7 +52,16 @@ export async function buildServer(
     await authenticate(request, reply);
   });
 
-  registerHealthRoute(app, options.probes ?? {});
+  registerHealthRoute(app, services.probes ?? {});
+
+  if (services.orchestrator !== undefined) {
+    registerTranslateRoute(app, services.orchestrator);
+  }
+  if (services.memory !== undefined) {
+    registerMemoryRoute(app, services.memory);
+    registerStatsRoute(app, services.memory);
+    registerRequestsRoute(app, services.memory);
+  }
 
   app.setNotFoundHandler(async (_request, reply) => {
     await reply.code(404).send({

@@ -38,6 +38,8 @@ export interface ImtPhase3DebugState {
     selectors?: string[];
   };
   error?: unknown;
+  /** 诊断快照：用于排查“页面一直停在翻译中”一类问题，不参与翻译流程。 */
+  snapshot?: () => Record<string, unknown>;
 }
 
 declare global {
@@ -193,6 +195,7 @@ export async function init(): Promise<() => void> {
     } else {
       controller.update(config, rule);
     }
+    debugState.snapshot = () => controller?.debugSnapshot() ?? {};
     mountFeatures(controller);
     if (!controller.isTranslated() && controller.shouldAutoTranslate())
       controller.start();

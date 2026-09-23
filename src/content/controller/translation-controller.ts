@@ -77,6 +77,10 @@ const PLACEHOLDER_STYLE = { open: "{", close: "}" } as const;
 const RECONNECT_DELAY_MS = 250;
 const REQUEST_TIMEOUT_MS = 20_000;
 const MAX_REQUEST_TIMEOUT_MS = 60_000;
+/** 段落翻译失败后的自动重试上限（普通模式）。 */
+const MAX_AUTOMATIC_RETRIES = 3;
+/** 完整性模式下允许更多重试，但必须同样有上限，避免页面永远停在“翻译中”。 */
+const MAX_INTEGRITY_RETRIES = 5;
 export const TRANSLATION_SESSION_ACTIVE_KEY = "imt-translation-session-active";
 export const TRANSLATION_SESSION_MODE_KEY = "imt-translation-session-mode";
 interface PendingRequest {
@@ -1301,6 +1305,22 @@ export class TranslationController implements PageControllerActions {
     ));
   }
 
+  /** 诊断快照：仅用于排查段落卡在 pending 的问题，不参与翻译流程。 */
+  debugSnapshot(): Record<string, unknown> {
+    return {
+      active: this.active,
+      pending: this.pendingIds.size,
+      deferred: this.deferredResults.length,
+      translated: this.renderedIds.size,
+      errors: this.errorIds.size,
+      pendingIds: [...this.pendingIds].slice(0, 20),
+      retryAttempts: [...this.retryAttempts.entries()].slice(0, 20),
+      retryTimers: [...this.retryTimers.keys()].slice(0, 20),
+      inFlightRequests: [...this.requests.keys()].slice(0, 10),
+      scrollActive: this.scrollActive,
+    };
+  }
+
   private renderResult(result: ParagraphTranslationResult): void {
     this.pendingIds.delete(result.id);
     this.deferredResults.push(result);
@@ -1396,12 +1416,20 @@ export class TranslationController implements PageControllerActions {
     if (this.retryTimers.has(paragraph.id)) return;
     const previous = this.retryAttempts.get(paragraph.id) ?? 0;
     const attempt = previous + 1;
-    if (!this.config.translationIntegrityMode && attempt > 3) {
+    // 完整性模式只是允许更多次重试，不能无限重试：只要段落永远失败，
+    // pending 就永远不会归零，页面会一直停在“翻译中”。
+    // 完整性模式只是允许更多次重试，不能无限重试：只要段落永远失败，
+    // pending 就永远不会归零，页面会一直停在“翻译中”。
+    const maxAttempts = this.config.translationIntegrityMode
+      ? MAX_INTEGRITY_RETRIES
+      : MAX_AUTOMATIC_RETRIES;
+    if (attempt > maxAttempts) {
       removeTranslation(paragraph);
       this.pendingIds.delete(paragraph.id);
       this.errorIds.delete(paragraph.id);
       markTranslated(paragraph.container, paragraph.id);
       this.renderedIds.add(paragraph.id);
+      this.retryAttempts.delete(paragraph.id);
       this.emitState();
       return;
     }
@@ -1412,7 +1440,12 @@ export class TranslationController implements PageControllerActions {
     this.errorIds.delete(paragraph.id);
     const timer = setTimeout(() => {
       this.retryTimers.delete(paragraph.id);
-      if (!this.active || !this.paragraphs.has(paragraph.id)) return;
+      if (!this.active || !this.paragraphs.has(paragraph.id)) {
+        // 段落已消失或翻译已关闭时，必须清掉挂起状态，否则 busy 永远为真。
+        this.pendingIds.delete(paragraph.id);
+        this.emitState();
+        return;
+      }
       this.errorIds.delete(paragraph.id);
       this.pendingIds.delete(paragraph.id);
       void this.translateParagraphIds([paragraph.id], "interactive");

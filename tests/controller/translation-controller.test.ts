@@ -700,6 +700,67 @@ describe("TranslationController", () => {
     controller.destroy();
   });
 
+  it("bounds retries in integrity mode so a failing paragraph cannot stall the page", async () => {
+    vi.useFakeTimers();
+    const source =
+      "A long paragraph that keeps failing while integrity mode stays enabled.";
+    document.body.innerHTML = `<article><p>${source}</p></article>`;
+    const advanced = Object.assign(config(), {
+      translateToPageEndImmediately: true,
+      translationIntegrityMode: true,
+    }) as AdvancedPageConfig;
+    const controller = new TranslationController(advanced, {
+      ...generalRule,
+      isTranslateTitle: false,
+    });
+    controller.start("whole");
+    await vi.advanceTimersByTimeAsync(150);
+
+    const requests = (): Array<{
+      requestId: string;
+      paragraphs: Array<{ id: string }>;
+    }> =>
+      portPosts.filter(
+        (
+          item,
+        ): item is {
+          type: "translate";
+          requestId: string;
+          paragraphs: Array<{ id: string }>;
+        } => (item as { type?: string }).type === "translate",
+      );
+
+    const failLatestRequest = (): void => {
+      const request = requests().at(-1);
+      if (!request) return;
+      portListeners[0]?.({
+        type: "translateResult",
+        requestId: request.requestId,
+        results: request.paragraphs.map(({ id }) => ({
+          id,
+          error: {
+            code: "NETWORK",
+            message: "temporary failure",
+            retryable: true,
+            serviceId: "test",
+          },
+        })),
+        done: true,
+      });
+    };
+
+    failLatestRequest();
+    for (let round = 0; round < 8; round += 1) {
+      await vi.advanceTimersByTimeAsync(6_000);
+      failLatestRequest();
+    }
+    await vi.advanceTimersByTimeAsync(6_000);
+
+    expect(document.documentElement.dataset.imtTranslationBusy).toBe("false");
+    expect(document.querySelector("p")?.textContent).toBe(source);
+    controller.destroy();
+  });
+
   it("treats an empty translation as invalid and requests it again", async () => {
     vi.useFakeTimers();
     const source =

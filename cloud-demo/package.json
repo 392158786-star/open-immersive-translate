@@ -14,7 +14,9 @@
     "typecheck": "tsc --noEmit",
     "build": "tsc --noEmit",
     "test": "vitest run",
-    "lint": "eslint ."
+    "lint": "eslint .",
+    "verify": "tsc --noEmit && eslint . && vitest run",
+    "preflight": "node scripts/preflight.ts"
   },
   "dependencies": {
     "@fastify/cors": "^11.0.1",

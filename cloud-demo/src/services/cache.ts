@@ -67,14 +67,22 @@ export interface RedisCacheStoreOptions {
 }
 
 function createRedisClient(config: RedisConfig): RedisCommandClient {
-  return new Redis({
+  const client = new Redis({
     host: config.host,
     port: config.port,
     ...(config.password !== undefined ? { password: config.password } : {}),
     db: config.db,
     lazyConnect: true,
     maxRetriesPerRequest: 2,
+    connectTimeout: 5_000,
+    // 连接失败时最多重试 3 次，避免健康检查长时间挂起。
+    retryStrategy: (times: number) =>
+      times > 3 ? null : Math.min(times * 200, 1_000),
   });
+  // ioredis 会把连接错误作为 error 事件抛出；没有监听器时会打印
+  // “Unhandled error event” 并反复刷屏。调用方通过 ping()/命令失败感知即可。
+  client.on("error", () => undefined);
+  return client;
 }
 
 /** Redis-backed JSON cache with a per-entry TTL. */

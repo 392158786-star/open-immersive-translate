@@ -639,10 +639,20 @@ describe("other machine translation adapters", () => {
     );
     expect(kept.texts).toEqual(["你好 {0} 世界"]);
 
+    // 占位符带空格、顺序变化都应当接受
+    fetchMock.mockResolvedValue(
+      json({ auto_translation: ["世界 { 0 } 你好 {1}"] }),
+    );
+    const tolerant = await service.translate(
+      { ...request, texts: ["Hello {0} world {1}"] },
+      signal(),
+    );
+    expect(tolerant.texts).toEqual(["世界 { 0 } 你好 {1}"]);
+
     fetchMock.mockResolvedValue(json({ auto_translation: ["你好世界"] }));
     await expect(
       service.translate({ ...request, texts: ["Hello {0} world"] }, signal()),
-    ).rejects.toThrow(/omitted inline placeholders/u);
+    ).rejects.toThrow(/changed inline placeholder count/u);
   });
 
   it("calls NiuTrans with form-encoded credentials", async () => {

@@ -752,10 +752,10 @@ describe("TranslationController", () => {
 
     failLatestRequest();
     for (let round = 0; round < 8; round += 1) {
-      await vi.advanceTimersByTimeAsync(6_000);
+      await vi.advanceTimersByTimeAsync(2_500);
       failLatestRequest();
     }
-    await vi.advanceTimersByTimeAsync(6_000);
+    await vi.advanceTimersByTimeAsync(2_500);
 
     expect(document.documentElement.dataset.imtTranslationBusy).toBe("false");
     expect(document.querySelector("p")?.textContent).toBe(source);

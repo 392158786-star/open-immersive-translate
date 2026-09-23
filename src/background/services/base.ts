@@ -80,6 +80,7 @@ export type { ServiceTranslateResult };
 export interface TranslationService {
   readonly id: string;
   readonly name: string;
+  readonly kind?: ServiceKind;
   readonly maxBatchSize: number;
   readonly maxBatchChars: number;
   readonly rateLimit: RateLimit;

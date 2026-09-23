@@ -1456,7 +1456,9 @@ export class TranslationController implements PageControllerActions {
     }
 
     this.retryAttempts.set(paragraph.id, attempt);
-    const delay = Math.min(5_000, 800 * 2 ** Math.min(attempt - 1, 3));
+    // 失败段落要尽快收敛：限流由调度器的退避负责，这里只做短促重试，
+    // 避免页面长时间停留在原文（仅中文模式下会出现成片英文）。
+    const delay = Math.min(2_000, 400 * 2 ** Math.min(attempt - 1, 2));
     removeTranslation(paragraph);
     this.errorIds.delete(paragraph.id);
     const timer = setTimeout(() => {

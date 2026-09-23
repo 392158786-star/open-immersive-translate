@@ -24,8 +24,15 @@ interface TransmartResponse {
   message?: string;
 }
 
-function placeholderTokens(text: string): string[] {
-  return text.match(/\{\/?\d+\}/g) ?? [];
+const PLACEHOLDER_PATTERN = /\{\s*\/?\s*\d+\s*\}/g;
+
+/**
+ * 统计内联占位符个数（容忍 `{ 0 }` 这类带空格的写法）。
+ * 只比较数量：译文里的占位符顺序可能变化，但数量必须一致，
+ * 否则说明上游吞掉了内联元素，渲染会错位。
+ */
+function placeholderCount(text: string): number {
+  return [...text.matchAll(PLACEHOLDER_PATTERN)].length;
 }
 
 /** Tencent Transmart's public web endpoint; no stability guarantee is provided. */
@@ -108,16 +115,19 @@ export class TransmartService extends BaseService {
         },
       );
     }
-    // 富文本占位符必须在译文里原样保留，否则内联元素会错位。
-    const missing = request.texts.flatMap((source, index) =>
-      placeholderTokens(source).filter(
-        (token) => !(texts[index] as string).includes(token),
-      ),
-    );
-    if (missing.length > 0) {
+    // 富文本占位符数量必须一致，否则内联元素会错位；顺序变化可以接受。
+    const mismatches = request.texts.flatMap((source, index) => {
+      const expected = placeholderCount(source);
+      if (expected === 0) return [];
+      const actual = placeholderCount(texts[index] as string);
+      return actual === expected
+        ? []
+        : [`paragraph ${index + 1}: expected ${expected}, got ${actual}`];
+    });
+    if (mismatches.length > 0) {
       throw new TranslateError(
         "parse",
-        `Transmart omitted inline placeholders: ${missing.join(", ")}.`,
+        `Transmart changed inline placeholder count (${mismatches.join("; ")}).`,
         { serviceId: this.id, retryable: false },
       );
     }

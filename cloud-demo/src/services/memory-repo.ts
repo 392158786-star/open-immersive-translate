@@ -132,7 +132,11 @@ function mapRequest(row: RequestRow): TranslationRequestRecord {
 }
 
 export class PostgresMemoryRepository {
-  constructor(private readonly database: Database) {}
+  private readonly database: Database;
+
+  constructor(database: Database) {
+    this.database = database;
+  }
 
   async findMemory(
     sourceHash: string,

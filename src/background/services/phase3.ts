@@ -1,4 +1,4 @@
-import type { ServiceConfig } from "../../shared/types";
+import type { ServiceConfig, ServiceKind } from "../../shared/types";
 import { AliyunService } from "./aliyun";
 import { AzureOpenAIService } from "./azure-openai";
 import { AzureTranslatorService } from "./azure-translator";
@@ -23,6 +23,19 @@ import { VolcService } from "./volc";
 import { YandexFreeService } from "./yandex-free";
 import { YoudaoService } from "./youdao";
 import { YoudaoFreeService } from "./youdao-free";
+
+function withKind(
+  service: TranslationService,
+  kind: ServiceKind,
+): TranslationService {
+  Object.defineProperty(service, "kind", {
+    value: kind,
+    enumerable: true,
+    writable: false,
+    configurable: false,
+  });
+  return service;
+}
 
 export function phase3Services(): TranslationService[] {
   const presets = OPENAI_PROVIDER_PRESETS.flatMap((preset) => {
@@ -77,7 +90,7 @@ export function createPhase3Service(
   };
   const preset = getPreset(id) ?? getPreset(kind);
   if (preset) {
-    return createPresetService(preset.id, {
+    const presetService = createPresetService(preset.id, {
       ...common,
       id,
       model: settings.model,
@@ -90,100 +103,131 @@ export function createPhase3Service(
       ignoreResRegexs: settings.ignoreResRegexs,
       stream: settings.stream,
     });
+    if (presetService) return withKind(presetService, config.kind);
   }
 
   switch (kind) {
     case "gemini":
-      return new GeminiService({
-        ...common,
-        model: settings.model,
-        prompt: settings.prompt,
-        promptSystem: settings.promptSystem,
-        promptUser: settings.promptUser,
-        temperature: settings.temperature,
-        maxTokens: settings.maxTokens,
-        ignoreResRegexs: settings.ignoreResRegexs,
-        stream: settings.stream,
-      });
+      return withKind(
+        new GeminiService({
+          ...common,
+          model: settings.model,
+          prompt: settings.prompt,
+          promptSystem: settings.promptSystem,
+          promptUser: settings.promptUser,
+          temperature: settings.temperature,
+          maxTokens: settings.maxTokens,
+          ignoreResRegexs: settings.ignoreResRegexs,
+          stream: settings.stream,
+        }),
+        config.kind,
+      );
     case "deepl":
     case "deepl-pro":
-      return new DeepLService({
-        ...common,
-        pro: kind === "deepl-pro",
-        formality: settings.formality,
-      });
+      return withKind(
+        new DeepLService({
+          ...common,
+          pro: kind === "deepl-pro",
+          formality: settings.formality,
+        }),
+        config.kind,
+      );
     case "bing":
-      return new BingService(common);
+      return withKind(new BingService(common), config.kind);
     case "azure":
     case "azure-translator":
-      return new AzureTranslatorService({ ...common, region: settings.region });
+      return withKind(
+        new AzureTranslatorService({ ...common, region: settings.region }),
+        config.kind,
+      );
     case "volc":
-      return new VolcService({
-        ...common,
-        appId: settings.appId,
-        secret: settings.secret,
-        region: settings.region,
-      });
+      return withKind(
+        new VolcService({
+          ...common,
+          appId: settings.appId,
+          secret: settings.secret,
+          region: settings.region,
+        }),
+        config.kind,
+      );
     case "tencent":
-      return new TencentService({
-        ...common,
-        appId: settings.appId,
-        secret: settings.secret,
-        region: settings.region,
-      });
+      return withKind(
+        new TencentService({
+          ...common,
+          appId: settings.appId,
+          secret: settings.secret,
+          region: settings.region,
+        }),
+        config.kind,
+      );
     case "baidu":
-      return new BaiduService({
-        ...common,
-        appId: settings.appId,
-        secret: settings.secret,
-      });
+      return withKind(
+        new BaiduService({
+          ...common,
+          appId: settings.appId,
+          secret: settings.secret,
+        }),
+        config.kind,
+      );
     case "youdao":
-      return new YoudaoService({
-        ...common,
-        appId: settings.appId,
-        secret: settings.secret,
-      });
+      return withKind(
+        new YoudaoService({
+          ...common,
+          appId: settings.appId,
+          secret: settings.secret,
+        }),
+        config.kind,
+      );
     case "youdao-free":
-      return new YoudaoFreeService(common);
+      return withKind(new YoudaoFreeService(common), config.kind);
     case "caiyun":
-      return new CaiyunService(common);
+      return withKind(new CaiyunService(common), config.kind);
     case "aliyun":
-      return new AliyunService({
-        ...common,
-        appId: settings.appId,
-        secret: settings.secret,
-        region: settings.region,
-      });
+      return withKind(
+        new AliyunService({
+          ...common,
+          appId: settings.appId,
+          secret: settings.secret,
+          region: settings.region,
+        }),
+        config.kind,
+      );
     case "papago":
-      return new PapagoService({
-        ...common,
-        appId: settings.appId,
-        secret: settings.secret,
-      });
+      return withKind(
+        new PapagoService({
+          ...common,
+          appId: settings.appId,
+          secret: settings.secret,
+        }),
+        config.kind,
+      );
     case "yandex-free":
-      return new YandexFreeService(common);
+      return withKind(new YandexFreeService(common), config.kind);
     case "transmart":
-      return new TransmartService(common);
+      return withKind(new TransmartService(common), config.kind);
     case "niu":
     case "niutrans":
-      return new NiuTransService(common);
+      return withKind(new NiuTransService(common), config.kind);
     case "openl":
-      return new OpenLService(common);
+      return withKind(new OpenLService(common), config.kind);
     case "azure-openai":
-      return new AzureOpenAIService({
-        ...common,
-        deployment: settings.deployment,
-        apiVersion: settings.apiVersion,
-        model: settings.model,
-        prompt: settings.prompt,
-        promptSystem: settings.promptSystem,
-        promptUser: settings.promptUser,
-        headers: settings.headers,
-        temperature: settings.temperature,
-        maxTokens: settings.maxTokens,
-        ignoreResRegexs: settings.ignoreResRegexs,
-        stream: settings.stream,
-      });
+      return withKind(
+        new AzureOpenAIService({
+          ...common,
+          deployment: settings.deployment,
+          apiVersion: settings.apiVersion,
+          model: settings.model,
+          prompt: settings.prompt,
+          promptSystem: settings.promptSystem,
+          promptUser: settings.promptUser,
+          headers: settings.headers,
+          temperature: settings.temperature,
+          maxTokens: settings.maxTokens,
+          ignoreResRegexs: settings.ignoreResRegexs,
+          stream: settings.stream,
+        }),
+        config.kind,
+      );
     default:
       return undefined;
   }

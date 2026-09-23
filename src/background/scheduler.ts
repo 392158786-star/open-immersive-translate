@@ -7,9 +7,11 @@ import type {
   Config,
   GlossaryEntry,
   LangCode,
+
+  ServiceConfig,
+  ServiceKind,
   TranslateParagraph,
   TranslationContext,
-  ServiceConfig,
 } from "../shared/types";
 import { loadConfig } from "../shared/config";
 import {
@@ -28,6 +30,20 @@ import { createService, getService } from "./services";
 
 const RETRY_DELAY_MS = 250;
 const RATE_LIMIT_MAX_RETRIES = 3;
+
+const LLM_SERVICE_KINDS = new Set<ServiceKind>([
+  "openai-compatible",
+  "chatgpt",
+  "claude",
+  "gemini",
+  "azure-openai",
+  "local-model",
+  "cloud",
+]);
+
+function isStrictServiceKind(kind?: ServiceKind): boolean {
+  return kind !== undefined && LLM_SERVICE_KINDS.has(kind);
+}
 const RATE_LIMIT_BACKOFF_BASE_MS = 500;
 const RATE_LIMIT_BACKOFF_MAX_MS = 2_000;
 const RATE_LIMIT_MAX_TOTAL_DELAY_MS = 10_000;
@@ -225,7 +241,9 @@ function unpackResult(
   sources: readonly string[],
   count: number,
   serviceId: string,
+  kind?: ServiceKind,
 ): BatchValue[] {
+  const strict = isStrictServiceKind(kind);
   return Array.from({ length: count }, (_, index) => {
     const error = result.errors?.[index];
     if (error) return { error };
@@ -239,7 +257,7 @@ function unpackResult(
       };
     }
     const source = sources[index];
-    if (source && translationLooksInvalid(source, text)) {
+    if (source && translationLooksInvalid(source, text, strict)) {
       return {
         error: itemError(
           `Translation response is incomplete for item ${index + 1}.`,
@@ -251,17 +269,25 @@ function unpackResult(
   });
 }
 
-function translationLooksIncomplete(source: string, translation: string): boolean {
+function translationLooksIncomplete(
+  source: string,
+  translation: string,
+  strict: boolean,
+): boolean {
   const sourceText = source.replace(/\{\/?\d+\}/g, "").trim();
   const sourceLetters = sourceText.match(/[A-Za-z]/g)?.length ?? 0;
   if (sourceLetters < 24 || !/[.!?。！？]/.test(sourceText)) return false;
   const translatedText = translation.replace(/\s+/g, "").trim();
-  return translatedText.length < Math.max(12, sourceLetters * 0.25);
+  const threshold = strict
+    ? Math.max(12, sourceLetters * 0.25)
+    : Math.max(6, sourceLetters * 0.08);
+  return translatedText.length < threshold;
 }
 
 function translationLooksUnrelated(
   source: string,
   translation: string,
+  strict: boolean,
 ): boolean {
   const normalizedSource = source.replace(/\{\/?\d+\}/g, "").trim();
   const normalizedTarget = translation.trim();
@@ -272,6 +298,7 @@ function translationLooksUnrelated(
   ) {
     return true;
   }
+  if (!strict) return false;
   const words = normalizedSource.split(/\s+/).filter(Boolean);
   const letters = normalizedSource.match(/[A-Za-z]/g)?.length ?? 0;
   return (
@@ -281,10 +308,14 @@ function translationLooksUnrelated(
   );
 }
 
-function translationLooksInvalid(source: string, translation: string): boolean {
+function translationLooksInvalid(
+  source: string,
+  translation: string,
+  strict: boolean,
+): boolean {
   return (
-    translationLooksIncomplete(source, translation) ||
-    translationLooksUnrelated(source, translation)
+    translationLooksIncomplete(source, translation, strict) ||
+    translationLooksUnrelated(source, translation, strict)
   );
 }
 
@@ -519,6 +550,7 @@ export class TranslationScheduler {
 
       const hits: ParagraphTranslationResult[] = [];
       const misses: SchedulerParagraph[] = [];
+      const primaryStrict = isStrictServiceKind(primary.kind);
       request.items.forEach((item, index) => {
         const value = cached[index];
         const normalized = value
@@ -526,7 +558,7 @@ export class TranslationScheduler {
           : undefined;
         if (
           normalized?.text !== undefined &&
-          !translationLooksInvalid(item.text, normalized.text)
+          !translationLooksInvalid(item.text, normalized.text, primaryStrict)
         ) {
           hits.push({ id: item.id, text: normalized.text });
         }
@@ -698,7 +730,7 @@ export class TranslationScheduler {
           signal,
         );
         if (signal.aborted) throw cancellationError(service.id);
-        return unpackResult(result, callTexts, callTexts.length, service.id);
+        return unpackResult(result, callTexts, callTexts.length, service.id, service.kind);
       } catch (error) {
         if (signal.aborted) throw cancellationError(service.id);
         return callTexts.map(() => ({ error }));

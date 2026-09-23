@@ -9,8 +9,21 @@ import { OpenAICompatibleService } from "./openai-compatible";
 import { ChatgptOauthService } from "./chatgpt-oauth/service";
 import { MockService } from "./mock";
 import { TranslateError, type TranslationService } from "./base";
-import type { ServiceConfig } from "../../shared/types";
+import type { ServiceConfig, ServiceKind } from "../../shared/types";
 import { createPhase3Service, registerPhase3Services } from "./phase3";
+
+function withKind(
+  service: TranslationService,
+  kind: ServiceKind,
+): TranslationService {
+  Object.defineProperty(service, "kind", {
+    value: kind,
+    enumerable: true,
+    writable: false,
+    configurable: false,
+  });
+  return service;
+}
 export {
   getModels,
   serviceFields,
@@ -63,6 +76,7 @@ export function createService(
 
   const common = {
     id,
+
     apiKey: config.apiKey,
     baseUrl: config.baseUrl,
     model: config.model,
@@ -79,91 +93,118 @@ export function createService(
 
   switch (config.kind) {
     case "openai-compatible":
-      return new OpenAICompatibleService({
-        ...common,
-        apiPath: config.apiPath,
-        temperature: config.temperature,
-        maxTokens: config.maxTokens,
-        ignoreResRegexs: config.ignoreResRegexs,
-      });
+      return withKind(
+        new OpenAICompatibleService({
+          ...common,
+          apiPath: config.apiPath,
+          temperature: config.temperature,
+          maxTokens: config.maxTokens,
+          ignoreResRegexs: config.ignoreResRegexs,
+        }),
+        config.kind,
+      );
     case "chatgpt":
-      return new ChatgptOauthService({
-        model: config.model,
-        prompt: config.prompt,
-        promptSystem: config.promptSystem,
-        promptUser: config.promptUser,
-        timeoutMs: config.timeoutMs,
-        maxBatchSize: config.maxBatchSize,
-        maxBatchChars: config.maxBatchChars,
-        rateLimit: config.rateLimit,
-        ignoreResRegexs: config.ignoreResRegexs,
-        reasoningEffort: config.reasoningEffort,
-        reasoningEffortAssistant: config.reasoningEffortAssistant,
-      });
+      return withKind(
+        new ChatgptOauthService({
+          model: config.model,
+          prompt: config.prompt,
+          promptSystem: config.promptSystem,
+          promptUser: config.promptUser,
+          timeoutMs: config.timeoutMs,
+          maxBatchSize: config.maxBatchSize,
+          maxBatchChars: config.maxBatchChars,
+          rateLimit: config.rateLimit,
+          ignoreResRegexs: config.ignoreResRegexs,
+          reasoningEffort: config.reasoningEffort,
+          reasoningEffortAssistant: config.reasoningEffortAssistant,
+        }),
+        config.kind,
+      );
     case "claude":
-      return new ClaudeService({
-        ...common,
-        apiPath: config.apiPath,
-        temperature: config.temperature,
-        maxTokens: config.maxTokens,
-        ignoreResRegexs: config.ignoreResRegexs,
-      });
+      return withKind(
+        new ClaudeService({
+          ...common,
+          apiPath: config.apiPath,
+          temperature: config.temperature,
+          maxTokens: config.maxTokens,
+          ignoreResRegexs: config.ignoreResRegexs,
+        }),
+        config.kind,
+      );
     case "google":
-      return new GoogleService({
-        id,
-        maxBatchSize: config.maxBatchSize,
-        maxBatchChars: config.maxBatchChars,
-        rateLimit: config.rateLimit,
-        timeoutMs: config.timeoutMs,
-      });
+      return withKind(
+        new GoogleService({
+          id,
+          maxBatchSize: config.maxBatchSize,
+          maxBatchChars: config.maxBatchChars,
+          rateLimit: config.rateLimit,
+          timeoutMs: config.timeoutMs,
+        }),
+        config.kind,
+      );
     case "mymemory":
-      return new MyMemoryService({
-        id,
-        email: config.apiKey,
-        maxBatchSize: config.maxBatchSize,
-        maxBatchChars: config.maxBatchChars,
-        rateLimit: config.rateLimit,
-        timeoutMs: config.timeoutMs,
-      });
+      return withKind(
+        new MyMemoryService({
+          id,
+          email: config.apiKey,
+          maxBatchSize: config.maxBatchSize,
+          maxBatchChars: config.maxBatchChars,
+          rateLimit: config.rateLimit,
+          timeoutMs: config.timeoutMs,
+        }),
+        config.kind,
+      );
     case "local-model":
-      return new LocalModelService({
-        id,
-        translationModel: config.model,
-        academicModel: config.models?.[0],
-        device: config.localDevice,
-        dtype: config.localDtype,
-        maxBatchSize: config.maxBatchSize,
-        maxBatchChars: config.maxBatchChars,
-        rateLimit: config.rateLimit,
-      });
+      return withKind(
+        new LocalModelService({
+          id,
+          translationModel: config.model,
+          academicModel: config.models?.[0],
+          device: config.localDevice,
+          dtype: config.localDtype,
+          maxBatchSize: config.maxBatchSize,
+          maxBatchChars: config.maxBatchChars,
+          rateLimit: config.rateLimit,
+        }),
+        config.kind,
+      );
     case "deeplx":
-      return new DeepLXService(common);
+      return withKind(new DeepLXService(common), config.kind);
     case "custom-http":
-      return new CustomHttpService({
-        ...common,
-        url: config.baseUrl,
-        method: config.method,
-        requestBodyTemplate: config.requestBodyTemplate,
-        responseJsonPath: config.responseJsonPath,
-      });
+      return withKind(
+        new CustomHttpService({
+          ...common,
+          url: config.baseUrl,
+          method: config.method,
+          requestBodyTemplate: config.requestBodyTemplate,
+          responseJsonPath: config.responseJsonPath,
+        }),
+        config.kind,
+      );
     case "cloud":
-      return new CloudService({
-        id,
-        apiKey: config.apiKey,
-        baseUrl: config.baseUrl,
-        headers: config.headers,
-        timeoutMs: config.timeoutMs,
-        maxBatchSize: config.maxBatchSize,
-        maxBatchChars: config.maxBatchChars,
-        rateLimit: config.rateLimit,
-      });
+      return withKind(
+        new CloudService({
+          id,
+          apiKey: config.apiKey,
+          baseUrl: config.baseUrl,
+          headers: config.headers,
+          timeoutMs: config.timeoutMs,
+          maxBatchSize: config.maxBatchSize,
+          maxBatchChars: config.maxBatchChars,
+          rateLimit: config.rateLimit,
+        }),
+        config.kind,
+      );
     case "mock":
-      return new MockService({
-        id,
-        maxBatchSize: config.maxBatchSize,
-        maxBatchChars: config.maxBatchChars,
-        rateLimit: config.rateLimit,
-      });
+      return withKind(
+        new MockService({
+          id,
+          maxBatchSize: config.maxBatchSize,
+          maxBatchChars: config.maxBatchChars,
+          rateLimit: config.rateLimit,
+        }),
+        config.kind,
+      );
     default:
       throw new TranslateError(
         "invalid_config",

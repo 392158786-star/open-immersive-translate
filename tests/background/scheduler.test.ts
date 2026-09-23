@@ -12,12 +12,13 @@ import {
   type ServiceTranslateResult,
   type TranslationService,
 } from "../../src/background/services/base";
-import type { TranslateRequest } from "../../src/shared/types";
+import type { TranslateRequest, ServiceKind } from "../../src/shared/types";
 
 class FakeService implements TranslationService {
   readonly name: string;
   readonly placeholder = { open: "{", close: "}" };
   readonly calls: string[][] = [];
+  readonly kind?: ServiceKind;
   active = 0;
   maximumActive = 0;
   supportsPair?: TranslationService["supportsPair"];
@@ -31,8 +32,10 @@ class FakeService implements TranslationService {
       request: TranslateRequest,
       signal: AbortSignal,
     ) => Promise<ServiceTranslateResult>,
+    kind?: ServiceKind,
   ) {
     this.name = id;
+    this.kind = kind;
   }
 
   async translate(
@@ -475,5 +478,162 @@ describe("TranslationScheduler", () => {
     scheduler.cancelTab(42);
 
     await expect(pending).rejects.toMatchObject({ code: "ABORTED" });
+  });
+
+  it("accepts machine translations with English proper nouns", async () => {
+    const service = new FakeService(
+      "primary",
+      10,
+      1_000,
+      { rps: 10_000, concurrency: 1 },
+      async () => ({ texts: ["ECMA-262 规范。"] }),
+      "transmart",
+    );
+    const scheduler = new TranslationScheduler({
+      cache: memoryCache(),
+      services: [service],
+    });
+    const results: string[] = [];
+
+    await scheduler.translateParagraphs(
+      request({
+        items: [
+          { id: "a", text: "The ECMA-262 specification defines the language." },
+        ],
+        onResult: (batch) => {
+          results.push(...batch.map((item) => item.text ?? item.error?.message ?? ""));
+        },
+      }),
+    );
+
+    expect(service.calls).toHaveLength(1);
+    expect(results).toEqual(["ECMA-262 规范。"]);
+  });
+
+  it("rejects the same translation from LLM services", async () => {
+    const primary = new FakeService(
+      "llm",
+      10,
+      1_000,
+      { rps: 10_000, concurrency: 1 },
+      async () => ({ texts: ["ECMA-262 规范。"] }),
+      "openai-compatible",
+    );
+    const fallback = new FakeService(
+      "fallback",
+      10,
+      1_000,
+      { rps: 10_000, concurrency: 1 },
+      async ({ texts }) => ({
+        texts: texts.map(() => "ECMA-262 语言规范定义了该标准。"),
+      }),
+    );
+    const scheduler = new TranslationScheduler({
+      cache: memoryCache(),
+      services: [primary, fallback],
+      fallbackServices: { llm: "fallback" },
+    });
+    const results: string[] = [];
+
+    await scheduler.translateParagraphs(
+      request({
+        serviceId: "llm",
+        items: [
+          { id: "a", text: "The ECMA-262 specification defines the language." },
+        ],
+        onResult: (batch) => {
+          results.push(...batch.map((item) => item.text ?? item.error?.message ?? ""));
+        },
+      }),
+    );
+
+    expect(primary.calls).toHaveLength(1);
+    expect(fallback.calls).toHaveLength(1);
+    expect(results).toEqual(["ECMA-262 语言规范定义了该标准。"]);
+  });
+
+  it("still rejects truncated translations from machine services", async () => {
+    const primary = new FakeService(
+      "transmart",
+      10,
+      1_000,
+      { rps: 10_000, concurrency: 1 },
+      async () => ({ texts: ["循环"] }),
+      "transmart",
+    );
+    const fallback = new FakeService(
+      "fallback",
+      10,
+      1_000,
+      { rps: 10_000, concurrency: 1 },
+      async ({ texts }) => ({
+        texts: texts.map(() => "在大多数情况下，使用循环技术更方便。"),
+      }),
+    );
+    const scheduler = new TranslationScheduler({
+      cache: memoryCache(),
+      services: [primary, fallback],
+      fallbackServices: { transmart: "fallback" },
+    });
+    const results: string[] = [];
+
+    await scheduler.translateParagraphs(
+      request({
+        serviceId: "transmart",
+        items: [
+          {
+            id: "a",
+            text: "In most such cases, it is convenient to use Looping Techniques.",
+          },
+        ],
+        onResult: (batch) => {
+          results.push(...batch.map((item) => item.text ?? item.error?.message ?? ""));
+        },
+      }),
+    );
+
+    expect(primary.calls).toHaveLength(1);
+    expect(fallback.calls).toHaveLength(1);
+    expect(results).toEqual(["在大多数情况下，使用循环技术更方便。"]);
+  });
+
+  it("still rejects garbled translations from machine services", async () => {
+    const primary = new FakeService(
+      "transmart",
+      10,
+      1_000,
+      { rps: 10_000, concurrency: 1 },
+      async () => ({ texts: ["ï¿½ï¿½ï¿½"] }),
+      "transmart",
+    );
+    const fallback = new FakeService(
+      "fallback",
+      10,
+      1_000,
+      { rps: 10_000, concurrency: 1 },
+      async ({ texts }) => ({
+        texts: texts.map(() => "你好世界。"),
+      }),
+    );
+    const scheduler = new TranslationScheduler({
+      cache: memoryCache(),
+      services: [primary, fallback],
+      fallbackServices: { transmart: "fallback" },
+    });
+    const results: string[] = [];
+
+    await scheduler.translateParagraphs(
+      request({
+        serviceId: "transmart",
+        items: [{ id: "a", text: "Hello world." }],
+        onResult: (batch) => {
+          results.push(...batch.map((item) => item.text ?? item.error?.message ?? ""));
+        },
+      }),
+    );
+
+    expect(primary.calls).toHaveLength(1);
+    expect(fallback.calls).toHaveLength(1);
+    expect(results).toEqual(["你好世界。"]);
   });
 });

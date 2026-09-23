@@ -3,6 +3,7 @@ import type {
   LangCode,
   PlaceholderStyle,
   RateLimit,
+  ServiceKind,
   TranslateError as SerializedTranslateError,
   TranslateErrorCode,
   TranslateRequest,
@@ -109,6 +110,7 @@ export interface TranslationStreamOptions {
 export interface BaseServiceOptions {
   id: string;
   name: string;
+  kind?: ServiceKind;
   maxBatchSize: number;
   maxBatchChars: number;
   rateLimit: RateLimit;
@@ -119,6 +121,7 @@ export interface BaseServiceOptions {
 export abstract class BaseService implements TranslationService {
   readonly id: string;
   readonly name: string;
+  readonly kind?: ServiceKind;
   readonly maxBatchSize: number;
   readonly maxBatchChars: number;
   readonly rateLimit: RateLimit;
@@ -127,6 +130,7 @@ export abstract class BaseService implements TranslationService {
   protected constructor(options: BaseServiceOptions) {
     this.id = options.id;
     this.name = options.name;
+    this.kind = options.kind;
     this.maxBatchSize = options.maxBatchSize;
     this.maxBatchChars = options.maxBatchChars;
     this.rateLimit = options.rateLimit;

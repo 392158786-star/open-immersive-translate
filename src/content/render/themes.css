@@ -52,9 +52,14 @@
   display: none !important;
 }
 
-html[data-imt-quick-mode="true"]
-  :is(h1, h2, h3, h4, h5, h6, p, li, blockquote, td, th):not([data-imt-id]) {
-  display: none !important;
+[data-imt-quick-pending="true"] {
+  color: transparent !important;
+}
+
+[data-imt-quick-pending="true"]::before {
+  display: block !important;
+  color: #175cd3 !important;
+  content: "翻译中…";
 }
 
 .imt-academic-term {

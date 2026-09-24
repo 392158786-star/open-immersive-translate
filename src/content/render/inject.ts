@@ -1851,6 +1851,7 @@ export function setLoading(
   const target = createTarget(paragraph, "loading");
   state.target = target;
   target.classList.add("imt-loading");
+  target.textContent = "翻译中";
   target.setAttribute("aria-label", "Translating");
   appendTarget(paragraph, target, "smart", state);
   applyReadingMode(state, readingMode);

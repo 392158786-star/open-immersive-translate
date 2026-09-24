@@ -592,7 +592,11 @@ export class TranslationController implements PageControllerActions {
       },
       {
         debounceMs: 180,
-        excludeSelectors: this.rule.mutationExcludeSelectors,
+        excludeSelectors: [
+          ...(this.rule.mutationExcludeSelectors ?? []),
+          "[data-imt]",
+          "[data-imt-id]",
+        ],
       },
     );
   }
@@ -819,11 +823,8 @@ export class TranslationController implements PageControllerActions {
         }
       }
     }
-    const quickMode = this.currentReadingMode() === "quick";
-    if (this.immediate || quickMode) {
-      this.collectMissedProse(queued, quickMode);
-    }
     if (this.immediate) {
+      this.collectMissedProse(queued);
       await this.translateIdsImmediately(queued);
     } else {
       for (const id of queued) {
@@ -834,8 +835,8 @@ export class TranslationController implements PageControllerActions {
     this.emitState();
   }
 
-  private collectMissedProse(queued: string[], force = false): void {
-    if (!this.immediate && !force) return;
+  private collectMissedProse(queued: string[]): void {
+    if (!this.immediate || !document.body) return;
     const root = this.scanRoot();
     if (!(root instanceof Element)) return;
     const knownContainers = new Set(
@@ -1118,7 +1119,7 @@ export class TranslationController implements PageControllerActions {
     const requestParagraphs: TranslatePortMessage["paragraphs"] = [];
     for (const paragraph of paragraphs) {
       if (this.currentReadingMode() === "quick") {
-        this.hideFailedSource(paragraph);
+        paragraph.container.setAttribute("data-imt-quick-pending", "true");
       }
       this.pendingIds.add(paragraph.id);
       this.errorIds.delete(paragraph.id);
@@ -1323,7 +1324,7 @@ export class TranslationController implements PageControllerActions {
   ): Promise<void> {
     const generation = this.generation;
     if (this.currentReadingMode() === "quick") {
-      this.hideFailedSource(paragraph);
+      paragraph.container.setAttribute("data-imt-quick-pending", "true");
     }
     this.pendingIds.add(paragraph.id);
     this.errorIds.delete(paragraph.id);
@@ -1758,6 +1759,7 @@ export class TranslationController implements PageControllerActions {
         ? decodePlaceholders(text, paragraph.placeholders, PLACEHOLDER_STYLE)
         : document.createDocumentFragment();
       if (!decode) fragment.append(text);
+      paragraph.container.removeAttribute("data-imt-quick-pending");
       this.hiddenSources.delete(paragraph.container);
       paragraph.container.classList.remove("imt-source-hidden");
       const target = renderTranslation(paragraph as Paragraph, fragment, {

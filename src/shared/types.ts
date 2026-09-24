@@ -279,6 +279,9 @@ export interface ServiceConfig {
 /** How source and translated text are displayed. */
 export type TranslationMode = "dual" | "translation";
 
+/** Product-level reading experience. */
+export type ReadingMode = "quick" | "professional" | "research";
+
 /** Smart wrappers choose a line break based on the source container. */
 export type WrapperAffix = "smart" | string;
 
@@ -346,6 +349,7 @@ export interface Config {
   targetLanguage: LangCode;
   sourceLanguage: LangCode;
   translationMode: TranslationMode;
+  readingMode: ReadingMode;
   theme: string;
   font?: string;
   service: string;

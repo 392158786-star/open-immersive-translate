@@ -110,7 +110,14 @@ describe("translatePage", () => {
     );
 
     const doc = createArticleDocument();
-    const report = await translatePage(doc, "en", "zh-CN", config, "dual", "none");
+    const report = await translatePage(
+      doc,
+      "en",
+      "zh-CN",
+      config,
+      "professional",
+      "none",
+    );
 
     expect(report.paragraphCount).toBeGreaterThan(0);
     expect(report.results.length).toBeGreaterThan(0);
@@ -127,7 +134,14 @@ describe("translatePage", () => {
     );
 
     const doc = createArticleDocument();
-    const report = await translatePage(doc, "en", "zh-CN", config, "dual", "none");
+    const report = await translatePage(
+      doc,
+      "en",
+      "zh-CN",
+      config,
+      "professional",
+      "none",
+    );
 
     expect(report.results.length).toBeGreaterThan(0);
     expect(report.fallbackCount).toBeGreaterThan(0);
@@ -135,11 +149,33 @@ describe("translatePage", () => {
     expect(report.results.every((r) => r.meta.serviceUsed === "mock")).toBe(true);
   });
 
-  it("returns empty report for original mode", async () => {
+  it("translates with the quick reading mode", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            requestId: "req-quick",
+            sourceText: "test",
+            targetText: "娴嬭瘯",
+            cacheLayer: "redis",
+            latencyMs: 3,
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        ),
+      ),
+    );
     const doc = createArticleDocument();
-    const report = await translatePage(doc, "en", "zh-CN", config, "original", "none");
-    expect(report.paragraphCount).toBe(0);
-    expect(report.results.length).toBe(0);
+    const report = await translatePage(
+      doc,
+      "en",
+      "zh-CN",
+      config,
+      "quick",
+      "none",
+    );
+    expect(report.paragraphCount).toBeGreaterThan(0);
+    expect(report.results.length).toBeGreaterThan(0);
   });
 
   it("tracks per-paragraph metadata", async () => {
@@ -160,7 +196,14 @@ describe("translatePage", () => {
     );
 
     const doc = createArticleDocument();
-    const report = await translatePage(doc, "en", "zh-CN", config, "translation", "none");
+    const report = await translatePage(
+      doc,
+      "en",
+      "zh-CN",
+      config,
+      "quick",
+      "none",
+    );
 
     for (const result of report.results) {
       expect(result.meta.cacheLayer).toBe("rds");
@@ -169,6 +212,47 @@ describe("translatePage", () => {
       expect(result.paragraphId).toBeTruthy();
       expect(result.sourceText).toBeTruthy();
     }
+  });
+
+  it("collapses body translations in research mode and reveals them on demand", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            requestId: "req-research",
+            sourceText: "test",
+            targetText: "研究译文",
+            cacheLayer: "redis",
+            latencyMs: 4,
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        ),
+      ),
+    );
+    const doc = createArticleDocument();
+    await translatePage(
+      doc,
+      "en",
+      "zh-CN",
+      config,
+      "research",
+      "none",
+    );
+
+    const paragraphTarget = doc.querySelector<HTMLElement>(
+      '[data-imt="target"]',
+    )!;
+    const toggle = doc.querySelector<HTMLButtonElement>(
+      '[data-imt="reading-toggle"]',
+    )!;
+
+    expect(paragraphTarget.dataset.imtReading).toBe("research");
+    expect(paragraphTarget.classList.contains("imt-research-hidden")).toBe(true);
+    expect(toggle).not.toBeNull();
+
+    toggle.click();
+    expect(paragraphTarget.classList.contains("imt-research-hidden")).toBe(false);
   });
 
   it("detects academic terms in paragraphs", async () => {
@@ -189,7 +273,14 @@ describe("translatePage", () => {
     );
 
     const doc = createArticleDocument();
-    const report = await translatePage(doc, "en", "zh-CN", config, "dual", "none");
+    const report = await translatePage(
+      doc,
+      "en",
+      "zh-CN",
+      config,
+      "professional",
+      "none",
+    );
 
     const allTerms = report.results.flatMap((r) => r.terms);
     expect(allTerms.length).toBeGreaterThan(0);
@@ -197,19 +288,19 @@ describe("translatePage", () => {
 });
 
 describe("switchMode", () => {
-  it("clears translations for original mode", () => {
+  it("clears translations when switching to quick mode", () => {
     const doc = createArticleDocument();
     document.body.innerHTML = doc.body.innerHTML;
-    switchMode(document, "original");
-    expect(document.querySelector("[data-imt]")).toBeNull();
+    switchMode(document, "quick");
+    expect(document.querySelector('[data-imt="target"]')).toBeNull();
   });
 
-  it("switches between dual and translation modes", () => {
+  it("switches between professional and research modes", () => {
     const doc = createArticleDocument();
     document.body.innerHTML = doc.body.innerHTML;
-    switchMode(document, "dual");
-    switchMode(document, "translation");
-    switchMode(document, "dual");
+    switchMode(document, "professional");
+    switchMode(document, "research");
+    switchMode(document, "professional");
   });
 });
 

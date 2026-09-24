@@ -1,50 +1,403 @@
-const HOVER_DELAY_MS = 200;
+import type { AcademicTermKnowledge } from "../../shared/types";
 
-function nearestBlock(target: Element, blockTags: ReadonlySet<string>): Element | null {
-  let current: Element | null = target;
-  while (current) {
-    if (blockTags.has(current.tagName.toUpperCase())) return current;
-    current = current.parentElement;
-  }
-  return null;
+const HOVER_DELAY_MS = 500;
+const CARD_MARGIN = 10;
+
+export interface HoverContextRequest {
+  word: string;
+  sentence: string;
+  previousSentence: string;
+  nextSentence: string;
+  paragraphTheme: string;
+  title: string;
+  domain: string;
+  clientX: number;
+  clientY: number;
 }
 
-/** Install hover translation that does not require a modifier key. */
-export function installDirectHoverTranslation(
-  translate: (container: Element) => Promise<void>,
-  blockTags: readonly string[],
-): () => void {
-  const blocks = new Set(blockTags.map((tag) => tag.toUpperCase()));
-  const translated = new WeakSet<Element>();
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  let pending: Element | null = null;
+export interface DirectHoverOptions {
+  delayMs?: number;
+  onBookmarkWord?(request: HoverContextRequest): void;
+  onBookmarkArticle?(request: HoverContextRequest): void;
+  onOpenSource?(knowledge: AcademicTermKnowledge): void;
+}
 
-  const clear = (): void => {
+type KnowledgeResolver = (
+  request: HoverContextRequest,
+) => Promise<AcademicTermKnowledge | undefined>;
+
+interface WordAtPoint {
+  node: Text;
+  start: number;
+  end: number;
+  word: string;
+}
+
+function isExcluded(target: Element): boolean {
+  return (
+    target.closest(
+      "a, button, input, textarea, select, option, pre, code, kbd, samp, [contenteditable='true'], [role='textbox'], [data-imt]",
+    ) !== null
+  );
+}
+
+function isCjk(value: string): boolean {
+  return /[\u3400-\u9fff\uf900-\ufaff]/u.test(value);
+}
+
+function isAsciiWordCharacter(value: string): boolean {
+  return /[A-Za-z0-9'-]/u.test(value);
+}
+
+function findWordAtPoint(
+  doc: Document,
+  clientX: number,
+  clientY: number,
+): WordAtPoint | undefined {
+  let node: Node | null;
+  let offset: number;
+  const caret = doc.caretPositionFromPoint?.(clientX, clientY);
+  if (caret) {
+    node = caret.offsetNode;
+    offset = caret.offset;
+  } else {
+    const range = doc.caretRangeFromPoint?.(clientX, clientY);
+    if (!range) return undefined;
+    node = range.startContainer;
+    offset = range.startOffset;
+  }
+  if (!(node instanceof Text) || !node.parentElement) return undefined;
+  if (isExcluded(node.parentElement)) return undefined;
+
+  const text = node.data;
+  if (!text) return undefined;
+  const nearOffset = Math.max(0, Math.min(text.length, offset));
+  const after = text[nearOffset] ?? "";
+  const before = text[nearOffset - 1] ?? "";
+  const at = after || before;
+  const predicate = isCjk(at) ? isCjk : isAsciiWordCharacter;
+  const index = predicate(after)
+    ? nearOffset
+    : predicate(before)
+      ? nearOffset - 1
+      : -1;
+  if (index < 0) return undefined;
+
+  let start = index;
+  let end = index + 1;
+  while (start > 0 && predicate(text[start - 1] ?? "")) start -= 1;
+  while (end < text.length && predicate(text[end] ?? "")) end += 1;
+  const word = text.slice(start, end).replace(/^['-]+|['-]+$/gu, "");
+  if (word.length < 2 || /^\d+$/u.test(word)) return undefined;
+  return { node, start, end, word };
+}
+
+function sentenceAround(
+  text: string,
+  offset: number,
+  length: number,
+): { current: string; previous: string; next: string } {
+  const boundary = /[\u3002\uff01\uff1f!?.;\u3002\uff1b;]/u;
+  let start = Math.max(0, offset);
+  while (start > 0 && !boundary.test(text[start - 1] ?? "")) start -= 1;
+  let end = Math.min(text.length, offset + length);
+  while (end < text.length && !boundary.test(text[end] ?? "")) end += 1;
+  if (end < text.length) end += 1;
+  const before = text.slice(0, start).trim();
+  const after = text.slice(end).trim();
+  const previousMatch = before.match(
+    /([^.!?\u3002\uff01\uff1f\u3002\uff1b;]+[.!?\u3002\uff01\uff1f\u3002\uff1b;]?)\s*$/u,
+  );
+  const nextMatch = after.match(/^(.+?[.!?\u3002\uff01\uff1f\u3002\uff1b;])/u);
+  return {
+    current: text.slice(start, end).replace(/\s+/gu, " ").trim(),
+    previous: previousMatch?.[1]?.replace(/\s+/gu, " ").trim() ?? "",
+    next:
+      nextMatch?.[1]?.replace(/\s+/gu, " ").trim() ??
+      after.slice(0, 180).replace(/\s+/gu, " ").trim(),
+  };
+}
+
+function sectionTitle(container: Element): string {
+  let current: Element | null = container;
+  while (current) {
+    const heading = current.querySelector(
+      "h1, h2, h3, h4, h5, h6, [role='heading']",
+    );
+    if (heading?.textContent?.trim()) return heading.textContent.trim();
+    current = current.previousElementSibling;
+  }
+  return "";
+}
+
+function inferDomain(text: string): string {
+  const value = text.toLowerCase();
+  const domains: Array<[string, string[]]> = [
+    ["Artificial intelligence", ["ai", "model", "neural", "learning", "language"]],
+    ["Finance and trade", ["bank", "market", "payment", "trade", "finance"]],
+    ["Computer science", ["software", "algorithm", "javascript", "database", "code"]],
+    ["Life sciences", ["clinical", "medical", "health", "protein", "gene"]],
+    ["Law and policy", ["law", "policy", "regulation", "court", "government"]],
+  ];
+  return (
+    domains.find(([, keywords]) =>
+      keywords.some((keyword) => value.includes(keyword)),
+    )?.[0] ?? "General reading"
+  );
+}
+
+export function buildHoverContext(
+  doc: Document,
+  point: WordAtPoint,
+  clientX: number,
+  clientY: number,
+): HoverContextRequest {
+  const parent = point.node.parentElement;
+  const block =
+    parent?.closest(
+      "p, li, blockquote, td, th, dd, dt, h1, h2, h3, h4, h5, h6, article",
+    ) ?? parent;
+  const paragraphText = block?.textContent?.replace(/\s+/gu, " ").trim() ?? "";
+  let offset = 0;
+  if (block) {
+    const range = doc.createRange();
+    range.setStart(block, 0);
+    range.setEnd(point.node, point.start);
+    offset = range.toString().length;
+  }
+  const context = sentenceAround(paragraphText, offset, point.word.length);
+  const heading =
+    doc.querySelector("article h1, main h1, h1")?.textContent?.trim() ?? "";
+  const title = heading || doc.title.trim();
+  const domain = inferDomain(
+    `${title} ${block?.textContent ?? ""} ${doc.location?.href ?? ""}`,
+  );
+  return {
+    word: point.word,
+    sentence: context.current || paragraphText.slice(0, 320),
+    previousSentence: context.previous,
+    nextSentence: context.next,
+    paragraphTheme:
+      sectionTitle(block ?? parent ?? doc.body) ||
+      context.current.slice(0, 120),
+    title,
+    domain,
+    clientX,
+    clientY,
+  };
+}
+
+function escapeHtml(value: string): string {
+  return value
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
+}
+
+function renderCard(
+  host: HTMLElement,
+  request: HoverContextRequest,
+  knowledge: AcademicTermKnowledge,
+): void {
+  const shadow = host.shadowRoot;
+  if (!shadow) return;
+  const source = knowledge.sources[0];
+  shadow.innerHTML = `
+    <style>
+      :host { all: initial; position: fixed; z-index: 2147483647; color-scheme: light; }
+      .card {
+        width: min(360px, calc(100vw - 24px));
+        box-sizing: border-box;
+        border: 1px solid #d0d5dd;
+        border-radius: 8px;
+        background: #ffffff;
+        color: #101828;
+        box-shadow: 0 10px 30px rgb(15 23 42 / 24%);
+        font: 13px/1.45 system-ui, sans-serif;
+        padding: 10px 12px;
+        cursor: pointer;
+      }
+      header { display: flex; align-items: baseline; gap: 8px; }
+      strong { font-size: 15px; }
+      .translation { color: #175cd3; font-weight: 600; }
+      .domain { margin-top: 2px; color: #667085; font-size: 11px; }
+      .definition { margin-top: 7px; }
+      .details { display: none; margin-top: 8px; }
+      .card[data-expanded="true"] .details { display: block; }
+      .summary { color: #475467; }
+      .source { margin-top: 6px; color: #475467; font-size: 12px; }
+      .source a { color: #175cd3; }
+      .actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 9px; }
+      button {
+        border: 1px solid #d0d5dd;
+        border-radius: 5px;
+        background: #ffffff;
+        color: #344054;
+        cursor: pointer;
+        font: 12px/1.2 system-ui, sans-serif;
+        padding: 5px 7px;
+      }
+      button:hover { border-color: #175cd3; color: #175cd3; }
+    </style>
+    <article class="card" data-expanded="false" role="dialog" aria-label="${escapeHtml(request.word)}">
+      <header>
+        <strong>${escapeHtml(knowledge.term || request.word)}</strong>
+        <span class="translation">${escapeHtml(knowledge.translation || request.word)}</span>
+      </header>
+      <div class="domain">${escapeHtml(knowledge.domain || request.domain)}</div>
+      <div class="definition">${escapeHtml(knowledge.definition || request.sentence)}</div>
+      <div class="details">
+        <div class="summary">${escapeHtml(knowledge.summary)}</div>
+        ${
+          source
+            ? `<div class="source">Source: <a href="${escapeHtml(source.url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(source.title)}</a></div>`
+            : ""
+        }
+        <div class="actions">
+          <button type="button" data-action="bookmark-word">收藏词语</button>
+          <button type="button" data-action="bookmark-article">收藏文章</button>
+          <button type="button" data-action="open-source">查看原文出处</button>
+        </div>
+      </div>
+    </article>
+  `;
+}
+
+function placeCard(host: HTMLElement, x: number, y: number): void {
+  const rect = host.getBoundingClientRect();
+  const left = Math.min(
+    Math.max(CARD_MARGIN, x + 14),
+    Math.max(CARD_MARGIN, window.innerWidth - rect.width - CARD_MARGIN),
+  );
+  const top = Math.min(
+    Math.max(CARD_MARGIN, y + 18),
+    Math.max(CARD_MARGIN, window.innerHeight - rect.height - CARD_MARGIN),
+  );
+  host.style.left = `${left}px`;
+  host.style.top = `${top}px`;
+}
+
+/** Install word-level context hover translation without a modifier key. */
+export function installDirectHoverTranslation(
+  resolve: KnowledgeResolver,
+  options: DirectHoverOptions = {},
+): () => void {
+  const delay = options.delayMs ?? HOVER_DELAY_MS;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let point: { x: number; y: number; key: string } | undefined;
+  let host: HTMLElement | undefined;
+  let sequence = 0;
+
+  const closeCard = (): void => {
+    sequence += 1;
+    host?.remove();
+    host = undefined;
+  };
+
+  const clearTimer = (): void => {
     if (timer !== undefined) clearTimeout(timer);
     timer = undefined;
-    pending = null;
+    point = undefined;
   };
-  const onMove = (event: MouseEvent): void => {
-    const target = event.target;
-    if (!(target instanceof Element) || target.closest("[data-imt]")) {
-      clear();
+
+  const showCard = (
+    request: HoverContextRequest,
+    knowledge: AcademicTermKnowledge,
+  ): void => {
+    host?.remove();
+    host = document.createElement("div");
+    host.dataset.imt = "context-card";
+    const shadow = host.attachShadow({ mode: "open" });
+    document.documentElement.append(host);
+    renderCard(host, request, knowledge);
+    placeCard(host, request.clientX, request.clientY);
+    shadow.querySelector<HTMLElement>(".card")?.addEventListener("click", (event) => {
+      const target = event.target as HTMLElement | null;
+      const action = target?.dataset.action;
+      if (action === "bookmark-word") {
+        options.onBookmarkWord?.(request);
+        return;
+      }
+      if (action === "bookmark-article") {
+        options.onBookmarkArticle?.(request);
+        return;
+      }
+      if (action === "open-source") {
+        options.onOpenSource?.(knowledge);
+        return;
+      }
+      const card = shadow.querySelector<HTMLElement>(".card");
+      if (!card) return;
+      const next = card.dataset.expanded !== "true";
+      card.dataset.expanded = String(next);
+      placeCard(host!, request.clientX, request.clientY);
+    });
+  };
+
+  const onMouseMove = (event: MouseEvent): void => {
+    if (event.composedPath().some((target) => target === host)) return;
+    const target =
+      document.elementFromPoint?.(event.clientX, event.clientY) ??
+      (event.target instanceof Element ? event.target : null);
+    if (!(target instanceof Element) || isExcluded(target)) {
+      clearTimer();
+      closeCard();
       return;
     }
-    const block = nearestBlock(target, blocks);
-    if (!block || translated.has(block) || pending === block) return;
-    clear();
-    pending = block;
+    const found = findWordAtPoint(document, event.clientX, event.clientY);
+    if (!found) {
+      clearTimer();
+      closeCard();
+      return;
+    }
+    const key = `${found.word}:${event.clientX}:${event.clientY}`;
+    if (point?.key === key) return;
+    clearTimer();
+    closeCard();
+    point = { x: event.clientX, y: event.clientY, key };
+    const localPoint = point;
     timer = setTimeout(() => {
-      const selected = pending;
-      clear();
-      if (!selected || translated.has(selected)) return;
-      translated.add(selected);
-      void translate(selected).catch(() => undefined);
-    }, HOVER_DELAY_MS);
+      timer = undefined;
+      point = undefined;
+      const word = findWordAtPoint(document, localPoint.x, localPoint.y);
+      if (!word || word.word !== found.word) return;
+      const request = buildHoverContext(
+        document,
+        word,
+        localPoint.x,
+        localPoint.y,
+      );
+      const requestSequence = ++sequence;
+      void resolve(request)
+        .then((knowledge) => {
+          if (requestSequence !== sequence || !knowledge) return;
+          showCard(request, knowledge);
+        })
+        .catch(() => undefined);
+    }, delay);
   };
-  document.addEventListener("mousemove", onMove, true);
+
+  const onPointerDown = (event: PointerEvent): void => {
+    if (!event.composedPath().some((target) => target === host)) closeCard();
+  };
+  const onKeyDown = (event: KeyboardEvent): void => {
+    if (event.key === "Escape") closeCard();
+  };
+  const onScroll = (): void => closeCard();
+
+  document.addEventListener("mousemove", onMouseMove, true);
+  document.addEventListener("pointerdown", onPointerDown, true);
+  document.addEventListener("keydown", onKeyDown, true);
+  document.addEventListener("scroll", onScroll, true);
+
   return () => {
-    clear();
-    document.removeEventListener("mousemove", onMove, true);
+    clearTimer();
+    closeCard();
+    document.removeEventListener("mousemove", onMouseMove, true);
+    document.removeEventListener("pointerdown", onPointerDown, true);
+    document.removeEventListener("keydown", onKeyDown, true);
+    document.removeEventListener("scroll", onScroll, true);
   };
 }

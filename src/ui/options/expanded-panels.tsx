@@ -440,13 +440,6 @@ export function ExpandedFeatureCards({
               void onPatch({ enableEditTranslation })
             }
           />
-          <Toggle
-            checked={config.hoverTranslateDirectly}
-            label="悬停直接翻译"
-            onChange={(hoverTranslateDirectly) =>
-              void onPatch({ hoverTranslateDirectly })
-            }
-          />
         </div>
         <div class="form-grid two-columns">
           <NumberField

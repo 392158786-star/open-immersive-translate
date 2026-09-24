@@ -54,19 +54,28 @@ test("扫描正文并逐段渲染译文与云端元数据", async ({ page }) => 
   await expect(page.locator(".page-report")).toContainText("缓存层: redis");
 });
 
-test("仅中文替换原文，双语保留配对，原文完全还原 DOM", async ({ page }) => {
+test("快速、专业和研究模式正确切换展示与原文 DOM", async ({ page }) => {
   await mockCloudTranslation(page);
   await translatePage(page);
 
-  await page.locator(".mode-row").getByRole("button", { name: "仅中文" }).click();
   const targets = page.locator('[data-imt="target"]');
   await expect(page.locator(".imt-target-replace")).toHaveCount(await targets.count());
   expect(await page.locator(".imt-source-hidden").count()).toBeGreaterThan(0);
 
-  await page.locator(".mode-row").getByRole("button", { name: "双语" }).click();
+  await page.locator(".mode-row").getByRole("button", { name: "专业" }).click();
   await expect(page.locator(".imt-target-replace")).toHaveCount(0);
 
-  await page.locator(".mode-row").getByRole("button", { name: "原文" }).click();
+  await page.locator(".mode-row").getByRole("button", { name: "研究" }).click();
+  const hiddenBefore = await page.locator(".imt-research-hidden").count();
+  expect(hiddenBefore).toBeGreaterThan(0);
+  const toggle = page.locator('[data-imt="reading-toggle"]').first();
+  await expect(toggle).toBeVisible();
+  await toggle.click();
+  expect(await page.locator(".imt-research-hidden").count()).toBeLessThan(
+    hiddenBefore,
+  );
+
+  await page.getByRole("button", { name: "清除翻译" }).click();
   await expect(page.locator("[data-imt]")).toHaveCount(0);
   await expect(page.locator("#demo-article p")).toHaveCount(5);
 });

@@ -246,6 +246,37 @@
   margin-top: 0 !important;
 }
 
+.imt-research-hidden {
+  display: none !important;
+}
+
+.imt-reading-toggle {
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  width: 1.55em !important;
+  height: 1.55em !important;
+  margin: 0.12em 0.4em 0.12em 0 !important;
+  padding: 0 !important;
+  border: 1px solid currentColor !important;
+  border-radius: 999px !important;
+  background: transparent !important;
+  color: inherit !important;
+  cursor: pointer !important;
+  font: 600 0.72em/1 system-ui, sans-serif !important;
+  opacity: 0.72;
+  vertical-align: middle !important;
+}
+
+.imt-reading-toggle[hidden] {
+  display: none !important;
+}
+
+.imt-reading-toggle[data-expanded="true"] {
+  background: rgb(127 127 127 / 18%) !important;
+  opacity: 1;
+}
+
 .imt-target-segment {
   display: block !important;
   margin: 0 !important;

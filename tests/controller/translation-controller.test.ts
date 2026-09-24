@@ -43,6 +43,7 @@ vi.mock("webextension-polyfill", () => ({ default: browserMock }));
 import { generalRule } from "../../src/background/rules/defaults";
 import { DEFAULT_CONFIG } from "../../src/shared/config";
 import {
+  READING_SESSION_MODE_KEY,
   TRANSLATION_SESSION_ACTIVE_KEY,
   TRANSLATION_SESSION_MODE_KEY,
   TranslationController,
@@ -88,6 +89,9 @@ describe("TranslationController", () => {
     expect(window.localStorage.getItem(TRANSLATION_SESSION_MODE_KEY)).toBe(
       "translation",
     );
+    expect(window.sessionStorage.getItem(READING_SESSION_MODE_KEY)).toBe(
+      "quick",
+    );
 
     controller.togglePage();
     expect(window.sessionStorage.getItem(TRANSLATION_SESSION_ACTIVE_KEY)).toBe(
@@ -100,6 +104,7 @@ describe("TranslationController", () => {
     const reopened = new TranslationController(config(), generalRule);
     expect(reopened.shouldAutoTranslate()).toBe(true);
     expect(reopened.config.translationMode).toBe("translation");
+    expect(reopened.config.readingMode).toBe("quick");
     reopened.destroy();
     controller.togglePage();
     expect(window.sessionStorage.getItem(TRANSLATION_SESSION_ACTIVE_KEY)).toBe(

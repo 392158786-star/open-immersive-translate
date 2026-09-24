@@ -79,7 +79,7 @@ function App(): preact.JSX.Element {
   const [apiKey, setApiKey] = useState("");
   const [fromLang, setFromLang] = useState<LangCode>("auto");
   const [toLang, setToLang] = useState<LangCode>("zh-CN");
-  const [pageMode, setPageMode] = useState<PageTranslationMode>("original");
+  const [pageMode, setPageMode] = useState<PageTranslationMode>("quick");
   const [pageReport, setPageReport] = useState<PageTranslationReport | null>(null);
   const [pageLoading, setPageLoading] = useState(false);
   const [sourceText, setSourceText] = useState(SAMPLE_TEXT);
@@ -128,14 +128,12 @@ function App(): preact.JSX.Element {
     try {
       const doc = document;
       injectPageStyles(doc);
-      const translationMode = pageMode === "original" ? "dual" : pageMode;
-      if (pageMode === "original") setPageMode("dual");
       const report = await translatePage(
         articleRef.current,
         fromLang,
         toLang,
         config,
-        translationMode,
+        pageMode,
         "none",
       );
       setPageReport(report);
@@ -302,9 +300,9 @@ function App(): preact.JSX.Element {
           </select>
         </div>
         <div class="mode-row">
-          <button class={pageMode === "original" ? "active" : ""} onClick={() => handleSwitchMode("original")}>原文</button>
-          <button class={pageMode === "dual" ? "active" : ""} onClick={() => handleSwitchMode("dual")}>双语</button>
-          <button class={pageMode === "translation" ? "active" : ""} onClick={() => handleSwitchMode("translation")}>仅中文</button>
+          <button class={pageMode === "quick" ? "active" : ""} onClick={() => handleSwitchMode("quick")}>快速</button>
+          <button class={pageMode === "professional" ? "active" : ""} onClick={() => handleSwitchMode("professional")}>专业</button>
+          <button class={pageMode === "research" ? "active" : ""} onClick={() => handleSwitchMode("research")}>研究</button>
         </div>
         <div class="action-row">
           <button onClick={handleTranslatePage} disabled={pageLoading}>

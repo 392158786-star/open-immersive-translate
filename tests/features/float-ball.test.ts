@@ -5,6 +5,11 @@ const browserMock = vi.hoisted(() => ({
     local: {
       get: vi.fn().mockResolvedValue({}),
       set: vi.fn().mockResolvedValue(undefined),
+      remove: vi.fn().mockResolvedValue(undefined),
+    },
+    onChanged: {
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
     },
   },
   runtime: {
@@ -128,6 +133,51 @@ describe("float ball", () => {
 
     expect(host.style.left).toBe("276px");
     expect(host.style.top).toBe("276px");
+    dispose();
+  });
+
+  it("snaps a centered ball to the nearest edge when the viewport changes", () => {
+    Object.defineProperty(window, "innerWidth", {
+      configurable: true,
+      value: 600,
+    });
+    Object.defineProperty(window, "innerHeight", {
+      configurable: true,
+      value: 400,
+    });
+    browserMock.storage.local.get.mockResolvedValueOnce({
+      [FLOAT_BALL_POSITION_KEY]: {
+        x: 0,
+        y: 0,
+        xRatio: 0.5,
+        yRatio: 0.5,
+      },
+    });
+    const dispose = init(context());
+    const host = document.querySelector<HTMLElement>(
+      '[data-imt="float-ball"]',
+    )!;
+
+    window.dispatchEvent(new Event("resize"));
+
+    expect(host.style.left).toBe("556px");
+    expect(host.style.top).toBe("182px");
+    dispose();
+  });
+
+  it("resets the saved position when storage removes the position key", () => {
+    const dispose = init(context());
+    const host = document.querySelector<HTMLElement>(
+      '[data-imt="float-ball"]',
+    )!;
+    const listener = browserMock.storage.onChanged.addListener.mock.calls[0]?.[0];
+    expect(listener).toBeTypeOf("function");
+
+    host.style.left = "10px";
+    listener({ [FLOAT_BALL_POSITION_KEY]: { oldValue: {} } }, "local");
+
+    expect(host.style.left).toBe("556px");
+    expect(host.style.top).toBe("182px");
     dispose();
   });
 });

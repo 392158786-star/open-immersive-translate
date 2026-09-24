@@ -44,4 +44,35 @@ describe("hover translation", () => {
     expect(translateParagraph).toHaveBeenCalledWith(paragraph);
     dispose();
   });
+
+  it("does not install hover translation in quick mode", () => {
+    vi.useFakeTimers();
+    document.body.innerHTML =
+      "<div><p id='paragraph'><span id='word'>Text</span></p></div>";
+    const word = document.querySelector("#word")!;
+    const translateParagraph = vi.fn().mockResolvedValue(undefined);
+    const ctx: FeatureContext = {
+      config: {
+        readingMode: "quick",
+        hover: { enabled: true, holdKey: "Alt" },
+      } as FeatureContext["config"],
+      rule: { matches: ["<all_urls>"], allBlockTags: ["DIV", "P"] },
+      translateText: vi.fn(),
+      translateParagraph,
+      toggleTranslate: vi.fn(),
+      isTranslated: vi.fn(),
+    };
+    const dispose = init(ctx);
+
+    word.dispatchEvent(
+      new MouseEvent("mousemove", {
+        bubbles: true,
+        altKey: true,
+      }),
+    );
+    vi.advanceTimersByTime(500);
+
+    expect(translateParagraph).not.toHaveBeenCalled();
+    dispose();
+  });
 });

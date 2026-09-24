@@ -1,11 +1,14 @@
 import browser from "webextension-polyfill";
 
+import {
+  FLOAT_BALL_POSITION_KEY as FLOAT_BALL_POSITION_STORAGE_KEY,
+} from "../../shared/config";
 import { sendToBackground } from "../../shared/messages";
 import type { FeatureContext } from "./context";
 
-export const FLOAT_BALL_POSITION_KEY = "floatBallPos";
 const FLOAT_BALL_SIZE = 36;
 const FLOAT_BALL_MARGIN = 8;
+export const FLOAT_BALL_POSITION_KEY = FLOAT_BALL_POSITION_STORAGE_KEY;
 
 interface FloatBallPosition {
   x: number;
@@ -169,8 +172,9 @@ export function init(ctx: FeatureContext): () => void {
     <div class="menu" role="menu" hidden>
       <button type="button" role="menuitem" data-action="settings">设置</button>
       <button type="button" role="menuitem" data-action="original">原网页</button>
-      <button type="button" role="menuitem" data-action="translation-only">仅中文</button>
-      <button type="button" role="menuitem" data-action="dual">中英对照</button>
+      <button type="button" role="menuitem" data-action="quick">快速模式</button>
+      <button type="button" role="menuitem" data-action="professional">专业模式</button>
+      <button type="button" role="menuitem" data-action="research">研究模式</button>
       <button type="button" role="menuitem" data-action="academic">学术助手</button>
       <button type="button" role="menuitem" data-action="never-site">从不翻译此站</button>
     </div>
@@ -223,7 +227,48 @@ export function init(ctx: FeatureContext): () => void {
   };
 
   const onViewportChange = (): void => {
+    const resolved = positionFromRatios(
+      currentRatio.xRatio,
+      currentRatio.yRatio,
+    );
+    const viewport = viewportBounds();
+    const maxX = Math.max(
+      viewport.left,
+      viewport.left + viewport.width - FLOAT_BALL_SIZE - FLOAT_BALL_MARGIN,
+    );
+    const x =
+      resolved.x < viewport.left + viewport.width / 2
+        ? viewport.left + FLOAT_BALL_MARGIN
+        : maxX;
+    setPosition({
+      x,
+      y: resolved.y,
+      xRatio: x === maxX ? 1 : 0,
+      yRatio: currentRatio.yRatio,
+    });
+  };
+
+  const resetPosition = (): void => {
+    positionTouched = false;
+    currentRatio = {
+      xRatio: ctx.config.floatBall.position === "left" ? 0 : 1,
+      yRatio: 0.5,
+    };
     setPosition(positionFromRatios(currentRatio.xRatio, currentRatio.yRatio));
+  };
+
+  const onStorageChanged = (
+    changes: Record<string, unknown>,
+    area: string,
+  ): void => {
+    if (
+      area === "local" &&
+      Object.prototype.hasOwnProperty.call(changes, FLOAT_BALL_POSITION_KEY) &&
+      (changes[FLOAT_BALL_POSITION_KEY] as { newValue?: unknown })?.newValue ===
+        undefined
+    ) {
+      resetPosition();
+    }
   };
 
   void browser.storage.local
@@ -249,13 +294,11 @@ export function init(ctx: FeatureContext): () => void {
     menu.hidden = true;
   };
   const refreshMenuState = (): void => {
-    const activeMode =
-      ctx.config.translationMode === "translation" ? "translation-only" : "dual";
     for (const item of menu.querySelectorAll<HTMLButtonElement>("button")) {
       const action = item.dataset.action;
       item.dataset.active = String(
         (!ctx.isTranslated() && action === "original") ||
-          (ctx.isTranslated() && action === activeMode) ||
+          (ctx.isTranslated() && action === ctx.config.readingMode) ||
           (action === "academic" &&
             ctx.config.academic?.enabled === true),
       );
@@ -334,13 +377,19 @@ export function init(ctx: FeatureContext): () => void {
       return;
     }
 
-    if (action === "translation-only" || action === "dual") {
+    if (
+      action === "quick" ||
+      action === "professional" ||
+      action === "research"
+    ) {
+      const readingMode = action;
       void sendToBackground({
         type: "setConfig",
         patch: {
           translateMainOnly: false,
-          translationMode:
-            action === "translation-only" ? "translation" : "dual",
+          readingMode,
+          translationMode: action === "quick" ? "translation" : "dual",
+          hoverTranslateDirectly: action !== "quick",
         },
       }).catch(() => undefined);
       if (!ctx.isTranslated()) ctx.toggleTranslate("whole");
@@ -398,6 +447,7 @@ export function init(ctx: FeatureContext): () => void {
   document.addEventListener("fullscreenchange", onViewportChange);
   document.addEventListener("pointerdown", onDocumentPointerDown);
   document.addEventListener("keydown", onKeyDown);
+  browser.storage.onChanged?.addListener?.(onStorageChanged);
   refreshMenuState();
 
   return () => {
@@ -414,6 +464,7 @@ export function init(ctx: FeatureContext): () => void {
     document.removeEventListener("fullscreenchange", onViewportChange);
     document.removeEventListener("pointerdown", onDocumentPointerDown);
     document.removeEventListener("keydown", onKeyDown);
+    browser.storage.onChanged?.removeListener?.(onStorageChanged);
     host.remove();
   };
 }

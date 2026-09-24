@@ -1,4 +1,9 @@
-import type { Paragraph, Rule, TranslationMode } from "../../shared/types";
+import type {
+  Paragraph,
+  ReadingMode,
+  Rule,
+  TranslationMode,
+} from "../../shared/types";
 
 import themeCss from "./themes.css?raw";
 
@@ -36,6 +41,7 @@ export interface TargetStyleOptions {
 
 export interface RenderTranslationOptions {
   mode: TranslationMode;
+  readingMode?: ReadingMode;
   theme: string;
   wrapperTag: "font";
   prefix: "smart" | "block" | "inline";
@@ -83,6 +89,10 @@ interface RenderState {
   sourceTexts: SourceTextState[];
   layoutAdjustments: LayoutStyleAdjustment[];
   interactiveTarget?: Element;
+  target?: HTMLElement;
+  readingToggle?: HTMLButtonElement;
+  readingMode?: ReadingMode;
+  translationExpanded?: boolean;
   paired?: boolean;
 }
 
@@ -413,6 +423,85 @@ function applyMode(state: RenderState, mode: TranslationMode): void {
   for (const { wrapper } of state.sourceTexts) {
     wrapper.classList.toggle("imt-source-hidden", hideSource);
   }
+}
+
+function isHeadingContainer(container: Element): boolean {
+  return (
+    /^H[1-6]$/u.test(container.tagName) ||
+    container.getAttribute("role") === "heading" ||
+    container.closest("h1, h2, h3, h4, h5, h6") !== null
+  );
+}
+
+function isLeadContainer(container: Element): boolean {
+  const root = container.closest("article, main, [role='main']");
+  const scope = root ?? container.ownerDocument.body;
+  if (!scope) return false;
+  const paragraphs = Array.from(scope.querySelectorAll("p")).filter(
+    (candidate) => (candidate.textContent ?? "").trim().length > 0,
+  );
+  return paragraphs[0] === container;
+}
+
+function isAlwaysVisibleInResearch(container: Element): boolean {
+  return isHeadingContainer(container) || isLeadContainer(container);
+}
+
+function ensureReadingToggle(
+  state: RenderState,
+  target: HTMLElement,
+): HTMLButtonElement {
+  if (state.readingToggle?.isConnected) return state.readingToggle;
+  const button = target.ownerDocument.createElement("button");
+  button.type = "button";
+  button.className = "imt-reading-toggle";
+  button.dataset.imt = "reading-toggle";
+  button.setAttribute("aria-label", "Show translation");
+  button.title = "Show translation";
+  button.textContent = "T";
+  button.addEventListener("click", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    if (state.readingMode !== "research") return;
+    state.translationExpanded = !state.translationExpanded;
+    applyReadingMode(state, "research");
+  });
+  target.insertAdjacentElement("beforebegin", button);
+  state.injected.push(button);
+  state.readingToggle = button;
+  return button;
+}
+
+function applyReadingMode(state: RenderState, mode: ReadingMode): void {
+  state.readingMode = mode;
+  const target = state.target;
+  applyMode(state, mode === "quick" ? "translation" : "dual");
+  if (!target) return;
+
+  target.dataset.imtReading = mode;
+  const alwaysVisible =
+    mode === "research" && isAlwaysVisibleInResearch(state.paragraph.container);
+  const visible =
+    mode !== "research" || alwaysVisible || state.translationExpanded === true;
+  target.classList.toggle("imt-research-translation", mode === "research");
+  target.classList.toggle("imt-research-hidden", !visible);
+
+  const toggle =
+    mode === "research" && !alwaysVisible
+      ? ensureReadingToggle(state, target)
+      : state.readingToggle;
+  if (!toggle) return;
+  toggle.hidden = mode !== "research" || alwaysVisible;
+  toggle.dataset.expanded = String(state.translationExpanded === true);
+  toggle.setAttribute("aria-expanded", String(state.translationExpanded === true));
+  toggle.setAttribute(
+    "aria-label",
+    state.translationExpanded ? "Hide translation" : "Show translation",
+  );
+  toggle.title = state.translationExpanded
+    ? "Hide translation"
+    : "Show translation";
+  toggle.textContent = state.translationExpanded ? "-" : "T";
 }
 
 function clearState(state: RenderState): void {
@@ -1682,6 +1771,7 @@ export function renderTranslation(
   const target = paragraph.container.ownerDocument.createElement(
     options.wrapperTag,
   );
+  state.target = target;
   target.classList.add("imt-target", `imt-theme-${options.theme}`);
   if (options.mode === "translation") {
     target.classList.add("imt-target-replace");
@@ -1700,6 +1790,7 @@ export function renderTranslation(
   appendTarget(paragraph, target, options.prefix, state);
   if (
     options.mode === "dual" &&
+    options.readingMode !== "research" &&
     buildReadablePairs(
       paragraph,
       target.textContent ?? "",
@@ -1709,7 +1800,13 @@ export function renderTranslation(
   ) {
     state.paired = true;
   }
-  applyMode(state, options.mode);
+  if (options.readingMode) {
+    applyReadingMode(state, options.readingMode);
+  } else {
+    state.readingMode =
+      options.mode === "translation" ? "quick" : "professional";
+    applyMode(state, options.mode);
+  }
   if (!state.paired) {
     segmentReadableTranslation(target, paragraph.container as HTMLElement);
   }
@@ -1802,7 +1899,7 @@ export function removeAll(root: Document | ShadowRoot | Element): void {
   }
   for (const element of queryElements(
     root,
-    '[data-imt="target"], [data-imt="loading"], [data-imt="error"], [data-imt="br"]',
+    '[data-imt="target"], [data-imt="loading"], [data-imt="error"], [data-imt="reading-toggle"], [data-imt="br"]',
   )) {
     element.remove();
   }
@@ -1822,7 +1919,22 @@ export function setMode(
 ): void {
   for (const state of states) {
     if (belongsToRoot(root, state.paragraph.container)) {
-      applyMode(state, mode);
+      applyReadingMode(
+        state,
+        mode === "translation" ? "quick" : "professional",
+      );
+    }
+  }
+}
+
+/** Switch rendered paragraphs between the three reading experiences. */
+export function setReadingMode(
+  root: Document | ShadowRoot | Element,
+  mode: ReadingMode,
+): void {
+  for (const state of states) {
+    if (belongsToRoot(root, state.paragraph.container)) {
+      applyReadingMode(state, mode);
     }
   }
 }

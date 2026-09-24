@@ -15,8 +15,10 @@ import {
 import { normalizeLang } from "../../shared/lang";
 import { lookupLocalUiPhrase } from "../../shared/local-ui-phrases";
 import type {
+  AcademicTermKnowledge,
   Config,
   Paragraph,
+  ReadingMode,
   Rule,
   TranslationMode,
   TranslationPriority,
@@ -48,13 +50,16 @@ import {
   setScrollAnchorSuppression,
   setTranslationScrollActive,
   setMask as setRenderedMask,
-  setMode as setRenderedMode,
+  setReadingMode as setRenderedReadingMode,
 } from "../render/inject";
 import {
   installEditableTranslations,
   TranslationOverrideStore,
 } from "./editable";
-import { installDirectHoverTranslation } from "./hover-directly";
+import {
+  installDirectHoverTranslation,
+  type HoverContextRequest,
+} from "./hover-directly";
 import { buildPageContext } from "./page-context";
 import {
   removeDuplicateTranslation,
@@ -83,6 +88,7 @@ const MAX_AUTOMATIC_RETRIES = 3;
 const MAX_INTEGRITY_RETRIES = 5;
 export const TRANSLATION_SESSION_ACTIVE_KEY = "imt-translation-session-active";
 export const TRANSLATION_SESSION_MODE_KEY = "imt-translation-session-mode";
+export const READING_SESSION_MODE_KEY = "imt-reading-session-mode";
 interface PendingRequest {
   message: TranslatePortMessage;
   remaining: Set<string>;
@@ -109,6 +115,12 @@ export interface TranslationControllerOptions {
   reportState?(state: PageTranslationState): void;
 }
 
+function isReadingMode(value: unknown): value is ReadingMode {
+  return (
+    value === "quick" || value === "professional" || value === "research"
+  );
+}
+
 /** Owns page extraction, scheduling, rendering, runtime modes, and state. */
 export class TranslationController implements PageControllerActions {
   config: AdvancedPageConfig;
@@ -119,9 +131,11 @@ export class TranslationController implements PageControllerActions {
   private immediate: boolean;
   private mask: boolean;
   private hoverDirectly: boolean;
+  private readingMode: ReadingMode;
   private videoSubtitlePreTranslation: boolean;
   private runtimeService?: string;
   private runtimeMode?: TranslationMode;
+  private runtimeReadingMode?: ReadingMode;
   private destroyed = false;
   private sequence = 0;
   private generation = 0;
@@ -172,6 +186,12 @@ export class TranslationController implements PageControllerActions {
     this.config = config as AdvancedPageConfig;
     this.rule = rule as AdvancedPageRule;
     try {
+      const readingMode = window.sessionStorage.getItem(
+        READING_SESSION_MODE_KEY,
+      );
+      if (isReadingMode(readingMode)) {
+        this.config = { ...this.config, readingMode };
+      }
       const sessionMode =
         window.sessionStorage.getItem(TRANSLATION_SESSION_MODE_KEY) ??
         window.localStorage.getItem(TRANSLATION_SESSION_MODE_KEY);
@@ -184,7 +204,8 @@ export class TranslationController implements PageControllerActions {
     this.scope = this.config.translateMainOnly === false ? "whole" : "main";
     this.immediate = this.config.translateToPageEndImmediately === true;
     this.mask = this.config.translationMask === true;
-    this.hoverDirectly = this.config.hoverTranslateDirectly === true;
+    this.readingMode = this.config.readingMode;
+    this.hoverDirectly = this.readingMode !== "quick";
     this.videoSubtitlePreTranslation = this.config.subtitle.preTranslation;
     this.reportState = options.reportState;
     this.injectPageStyles();
@@ -257,29 +278,57 @@ export class TranslationController implements PageControllerActions {
   }
 
   setMode(mode: TranslationMode): void {
-    this.runtimeMode = mode;
-    this.config = { ...this.config, translationMode: mode };
+    this.setReadingMode(mode === "translation" ? "quick" : "professional");
+  }
+
+  setReadingMode(mode: ReadingMode): void {
+    const translationMode: TranslationMode =
+      mode === "quick" ? "translation" : "dual";
+    this.runtimeReadingMode = mode;
+    this.readingMode = mode;
+    this.runtimeMode = translationMode;
+    this.config = {
+      ...this.config,
+      readingMode: mode,
+      translationMode,
+      hoverTranslateDirectly: mode !== "quick",
+    };
+    this.hoverDirectly = mode !== "quick";
     try {
-      window.sessionStorage.setItem(TRANSLATION_SESSION_MODE_KEY, mode);
+      window.sessionStorage.setItem(READING_SESSION_MODE_KEY, mode);
+      window.sessionStorage.setItem(
+        TRANSLATION_SESSION_MODE_KEY,
+        translationMode,
+      );
     } catch {
       // Mode still applies for the current document without session storage.
     }
     try {
-      window.localStorage.setItem(TRANSLATION_SESSION_MODE_KEY, mode);
+      window.localStorage.setItem(READING_SESSION_MODE_KEY, mode);
+      window.localStorage.setItem(
+        TRANSLATION_SESSION_MODE_KEY,
+        translationMode,
+      );
     } catch {
       // Mode still applies for the current document without local storage.
     }
     void sendToBackground({
       type: "setConfig",
-      patch: { translationMode: mode },
+      patch: {
+        readingMode: mode,
+        translationMode,
+        hoverTranslateDirectly: mode !== "quick",
+      },
     }).catch(() => undefined);
-    setRenderedMode(document, mode);
-    if (mode !== "translation") this.restoreHiddenSources();
+    setRenderedReadingMode(document, mode);
+    if (translationMode !== "translation") this.restoreHiddenSources();
+    this.installDirectHover();
   }
 
   toggleOnlyTranslation(): void {
-    const current = this.currentMode();
-    this.setMode(current === "translation" ? "dual" : "translation");
+    this.setReadingMode(
+      this.currentReadingMode() === "quick" ? "professional" : "quick",
+    );
   }
 
   togglePageEndImmediately(): void {
@@ -301,8 +350,9 @@ export class TranslationController implements PageControllerActions {
   }
 
   toggleHoverDirectly(): void {
-    this.hoverDirectly = !this.hoverDirectly;
-    this.installDirectHover();
+    this.setReadingMode(
+      this.currentReadingMode() === "quick" ? "professional" : "quick",
+    );
   }
 
   toggleVideoSubtitlePreTranslation(): void {
@@ -331,9 +381,11 @@ export class TranslationController implements PageControllerActions {
     this.pageLanguage = detectPageLanguage(document);
     this.immediate = this.config.translateToPageEndImmediately === true;
     this.mask = this.config.translationMask === true;
-    this.hoverDirectly = this.config.hoverTranslateDirectly === true;
+    this.readingMode = this.config.readingMode;
+    this.hoverDirectly = this.readingMode !== "quick";
     this.videoSubtitlePreTranslation = this.config.subtitle.preTranslation;
     this.runtimeMode = undefined;
+    this.runtimeReadingMode = undefined;
     this.runtimeService = undefined;
     this.injectPageStyles();
     setRenderedMask(document, this.mask);
@@ -483,14 +535,21 @@ export class TranslationController implements PageControllerActions {
   }
 
   private currentMode(): TranslationMode {
+    return this.currentReadingMode() === "quick" ? "translation" : "dual";
+  }
+
+  private currentReadingMode(): ReadingMode {
     return (
-      this.runtimeMode ??
-      resolveTranslationMode(
+      this.runtimeReadingMode ??
+      this.config.readingMode ??
+      (resolveTranslationMode(
         this.config,
         this.rule,
         window.location.href,
         this.pageLanguage,
-      )
+      ) === "translation"
+        ? "quick"
+        : "professional")
     );
   }
 
@@ -641,9 +700,52 @@ export class TranslationController implements PageControllerActions {
     this.stopDirectHover = undefined;
     if (!this.hoverDirectly) return;
     this.stopDirectHover = installDirectHoverTranslation(
-      (container) => this.translateParagraph(container),
-      this.rule.allBlockTags ?? [],
+      (request) => this.resolveHoverKnowledge(request),
+      {
+        onBookmarkWord: (request) => {
+          document.dispatchEvent(
+            new CustomEvent("imt:bookmark-word", { detail: request }),
+          );
+        },
+        onBookmarkArticle: (request) => {
+          document.dispatchEvent(
+            new CustomEvent("imt:bookmark-article", { detail: request }),
+          );
+        },
+        onOpenSource: (knowledge) => {
+          const source = knowledge.sources[0]?.url;
+          if (source) {
+            window.open(source, "_blank", "noopener,noreferrer");
+            return;
+          }
+          void sendToBackground({
+            type: "openAcademic",
+            term: knowledge.term,
+          }).catch(() => undefined);
+        },
+      },
     );
+  }
+
+  private async resolveHoverKnowledge(
+    request: HoverContextRequest,
+  ): Promise<AcademicTermKnowledge | undefined> {
+    const context = [
+      request.previousSentence,
+      request.sentence,
+      request.nextSentence,
+    ]
+      .filter(Boolean)
+      .join(" ");
+    return sendToBackground({
+      type: "academicResolve",
+      term: request.word,
+      context: `${request.paragraphTheme}\n${context}`,
+      title: request.title,
+      url: window.location.href,
+      domain: request.domain,
+      service: this.config.academic.service,
+    }) as Promise<AcademicTermKnowledge | undefined>;
   }
 
   private scanRoot(): Node {
@@ -1636,6 +1738,7 @@ export class TranslationController implements PageControllerActions {
       if (!decode) fragment.append(text);
       const target = renderTranslation(paragraph as Paragraph, fragment, {
         mode: this.currentMode(),
+        readingMode: this.currentReadingMode(),
         theme: this.currentTheme(),
         wrapperTag: "font",
         automaticColor: this.config.autoTranslationColor !== false,

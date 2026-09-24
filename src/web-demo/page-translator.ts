@@ -1,4 +1,9 @@
-import type { Paragraph, Rule, LangCode, TranslationMode } from "../shared/types";
+import type {
+  Paragraph,
+  ReadingMode,
+  Rule,
+  LangCode,
+} from "../shared/types";
 import { extractParagraphs } from "../content/extract/scanner";
 import {
   detectPageLanguage,
@@ -10,7 +15,7 @@ import {
   renderTranslation,
   removeTranslation,
   removeAll,
-  setMode,
+  setReadingMode,
   injectStyles,
   setLoading,
   markTranslated,
@@ -25,7 +30,7 @@ import {
 } from "../content/academic/terms";
 import { translateText, type CloudDemoConfig, type TranslationMetadata } from "./translator";
 
-export type PageTranslationMode = "original" | "dual" | "translation";
+export type PageTranslationMode = ReadingMode;
 
 export interface ParagraphTranslationResult {
   paragraphId: string;
@@ -55,12 +60,13 @@ const DEFAULT_RULE: Rule = {
 const PLACEHOLDER_STYLE = { open: "{", close: "}" } as const;
 
 function buildRenderOptions(
-  mode: TranslationMode,
+  mode: PageTranslationMode,
   theme: string,
   terms: string[],
 ): RenderTranslationOptions {
   return {
-    mode,
+    mode: mode === "quick" ? "translation" : "dual",
+    readingMode: mode,
     theme,
     wrapperTag: "font",
     prefix: "smart",
@@ -99,7 +105,7 @@ export async function translateParagraph(
   from: LangCode,
   to: LangCode,
   config: CloudDemoConfig,
-  mode: TranslationMode,
+  mode: PageTranslationMode,
   theme: string,
   signal?: AbortSignal,
 ): Promise<ParagraphTranslationResult> {
@@ -136,19 +142,6 @@ export async function translatePage(
   rule?: Rule,
   signal?: AbortSignal,
 ): Promise<PageTranslationReport> {
-  if (mode === "original") {
-    removeAll(root);
-    return {
-      pageLanguage: "auto",
-      mainContentSelector: "",
-      paragraphCount: 0,
-      results: [],
-      totalLatencyMs: 0,
-      cacheLayers: [],
-      fallbackCount: 0,
-    };
-  }
-
   const { mainArea, paragraphs, pageLanguage } = scanPage(root, rule);
 
   if (root instanceof Document) {
@@ -198,11 +191,7 @@ export function switchMode(
   root: Document | Element,
   mode: PageTranslationMode,
 ): void {
-  if (mode === "original") {
-    removeAll(root);
-    return;
-  }
-  setMode(root, mode);
+  setReadingMode(root, mode);
 }
 
 export function observeDynamicContent(

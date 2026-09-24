@@ -14,10 +14,13 @@ import { DEFAULT_SUBTITLE_CONFIG, type SubtitleConfig } from "./subtitle-types";
 import type { Config, ConfigPatch, Rule, ServiceConfig } from "./types";
 
 /** Current persisted configuration format. */
-export const CONFIG_VERSION = 14;
+export const CONFIG_VERSION = 15;
 
 /** Storage key containing the complete configuration object. */
 export const CONFIG_STORAGE_KEY = "config";
+
+/** Storage key for the floating translation control position. */
+export const FLOAT_BALL_POSITION_KEY = "floatBallPos";
 
 const langCodeSchema = z.enum(LANGUAGE_CODES);
 const glossarySchema = z.object({
@@ -275,6 +278,7 @@ export const configSchema: z.ZodType<Config> = z.object({
   targetLanguage: langCodeSchema.default("zh-CN"),
   sourceLanguage: langCodeSchema.default("auto"),
   translationMode: z.enum(["dual", "translation"]).default("translation"),
+  readingMode: z.enum(["quick", "professional", "research"]).default("quick"),
   theme: z.string().default("underline"),
   font: z.string().optional(),
   service: z.string().default("transmart"),
@@ -828,6 +832,19 @@ registerConfigMigration(13, (config) => ({
   ...config,
   version: 14,
   secondaryService: "cloud",
+}));
+
+registerConfigMigration(14, (config) => ({
+  ...config,
+  version: 15,
+  readingMode:
+    config.readingMode === "quick" ||
+    config.readingMode === "professional" ||
+    config.readingMode === "research"
+      ? config.readingMode
+      : config.translationMode === "dual"
+        ? "professional"
+        : "quick",
 }));
 
 /** Upgrade unknown stored data and validate it as the current configuration. */

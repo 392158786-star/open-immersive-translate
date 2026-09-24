@@ -77,6 +77,59 @@ describe("renderTranslation", () => {
     expect(container.textContent).toBe("Hello你好");
   });
 
+  it("keeps headings visible and collapses body translations in research mode", () => {
+    document.body.innerHTML =
+      "<article><h1>Research title</h1><p>Lead paragraph</p><p>Research body</p></article>";
+    const heading = document.querySelector("h1")!;
+    const lead = document.querySelector("p")!;
+    const paragraph = document.querySelectorAll("p")[1]!;
+
+    const headingTarget = renderTranslation(
+      makeParagraph(heading),
+      translationFragment("研究标题"),
+      {
+        mode: "dual",
+        readingMode: "research",
+        theme: "underline",
+        wrapperTag: "font",
+        prefix: "smart",
+      },
+    );
+    const bodyTarget = renderTranslation(
+      makeParagraph(paragraph),
+      translationFragment("研究正文"),
+      {
+        mode: "dual",
+        readingMode: "research",
+        theme: "underline",
+        wrapperTag: "font",
+        prefix: "smart",
+      },
+    );
+    const leadTarget = renderTranslation(
+      makeParagraph(lead),
+      translationFragment("引导译文"),
+      {
+        mode: "dual",
+        readingMode: "research",
+        theme: "underline",
+        wrapperTag: "font",
+        prefix: "smart",
+      },
+    );
+    const toggle = paragraph.querySelector<HTMLButtonElement>(
+      '[data-imt="reading-toggle"]',
+    )!;
+
+    expect(headingTarget.classList.contains("imt-research-hidden")).toBe(false);
+    expect(leadTarget.classList.contains("imt-research-hidden")).toBe(false);
+    expect(bodyTarget.classList.contains("imt-research-hidden")).toBe(true);
+    expect(toggle.hidden).toBe(false);
+
+    toggle.click();
+    expect(bodyTarget.classList.contains("imt-research-hidden")).toBe(false);
+  });
+
   it("shrinks constrained source text without shrinking the target", () => {
     document.body.innerHTML =
       '<div class="card"><h4><a href="/story">A constrained English source headline.</a></h4></div>';

@@ -1,5 +1,6 @@
 import { render } from "preact";
 import { useEffect, useRef, useState } from "preact/hooks";
+import browser from "webextension-polyfill";
 
 import { builtinRules } from "../../background/rules/builtin-rules";
 import {
@@ -10,6 +11,7 @@ import {
   type ServiceFieldDescriptor,
 } from "../../background/services";
 import { LANGUAGE_CODES } from "../../shared/lang";
+import { FLOAT_BALL_POSITION_KEY } from "../../shared/config";
 import {
   sendToBackground,
   type ChatgptOauthStatus,
@@ -20,10 +22,10 @@ import { EXTENSION_COMMAND_IDS } from "../../background/commands";
 import type {
   JsonValue,
   LangCode,
+  ReadingMode,
   ReasoningEffort,
   Rule,
   ServiceConfig,
-  TranslationMode,
 } from "../../shared/types";
 import {
   clampEffort,
@@ -222,18 +224,21 @@ function BasicPanel({ config, onPatch }: PanelProps): preact.JSX.Element {
           </Field>
         </div>
         <div class="segmented options-segmented" role="group">
-          {(["dual", "translation"] as const).map((mode) => (
+          {(["quick", "professional", "research"] as const).map((mode) => (
             <button
               key={mode}
               type="button"
-              aria-pressed={config.translationMode === mode}
+              aria-pressed={config.readingMode === mode}
               onClick={() =>
                 save(onPatch, {
-                  translationMode: mode as TranslationMode,
+                  readingMode: mode as ReadingMode,
+                  translationMode:
+                    mode === "quick" ? "translation" : "dual",
+                  hoverTranslateDirectly: mode !== "quick",
                 })
               }
             >
-              {t(mode === "dual" ? "mode.dual" : "mode.translation")}
+              {t(`mode.${mode}`)}
             </button>
           ))}
         </div>
@@ -308,6 +313,17 @@ function BasicPanel({ config, onPatch }: PanelProps): preact.JSX.Element {
               }
             />
           </Field>
+          <Button
+            variant="quiet"
+            disabled={!config.floatBall.enabled}
+            onClick={() => {
+              void browser.storage.local
+                .remove(FLOAT_BALL_POSITION_KEY)
+                .catch(console.error);
+            }}
+          >
+            {t("basic.resetFloatBallPosition")}
+          </Button>
         </div>
       </Card>
     </div>

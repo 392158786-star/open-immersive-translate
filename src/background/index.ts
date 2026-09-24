@@ -294,6 +294,7 @@ browser.runtime.onMessage.addListener(
           context: request.context,
           title: request.title,
           url: request.url,
+          domain: request.domain,
           service: request.service,
         });
       case "academicGet":

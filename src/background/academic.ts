@@ -47,6 +47,7 @@ interface AcademicResolveInput {
   context: string;
   title?: string;
   url?: string;
+  domain?: string;
   service?: string;
 }
 
@@ -360,6 +361,7 @@ async function resolveWithAi(
   if (!service.completePrompt) return undefined;
 
   const prompt = [
+    `Domain: ${input.domain ?? "unspecified"}`,
     "你是中文学术术语助手。请严格结合给定上下文和检索结果，判断术语在本文中的含义。",
     `术语：${input.term}`,
     `文章标题：${input.title ?? "未提供"}`,
@@ -421,7 +423,14 @@ async function writeCache(cache: Cache): Promise<void> {
 
 export async function getAcademicKnowledge(
   term: string,
-  options: { refresh?: boolean; context?: string; title?: string; url?: string; service?: string } = {},
+  options: {
+    refresh?: boolean;
+    context?: string;
+    title?: string;
+    url?: string;
+    domain?: string;
+    service?: string;
+  } = {},
 ): Promise<AcademicTermKnowledge | undefined> {
   const normalized = normalizeTerm(term);
   if (!normalized) return undefined;
@@ -444,6 +453,7 @@ export async function getAcademicKnowledge(
           context: options.context ?? "",
           title: options.title,
           url: options.url,
+          domain: options.domain,
           service: options.service,
         },
         config,

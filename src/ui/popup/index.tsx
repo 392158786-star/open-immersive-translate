@@ -4,7 +4,10 @@ import browser from "webextension-polyfill";
 
 import { LANGUAGE_CODES } from "../../shared/lang";
 import { sendToBackground, sendToTab } from "../../shared/messages";
-import type { LangCode, TranslationMode } from "../../shared/types";
+import type {
+  LangCode,
+  ReadingMode,
+} from "../../shared/types";
 import { Button, Field, Select, Toggle } from "../shared/components";
 import {
   languageName,
@@ -159,18 +162,21 @@ export function Popup(): preact.JSX.Element {
       <section class="popup-section">
         <h2>{t("popup.mode")}</h2>
         <div class="segmented" role="group" aria-label={t("popup.mode")}>
-          {(["dual", "translation"] as const).map((mode) => (
+          {(["quick", "professional", "research"] as const).map((mode) => (
             <button
               key={mode}
               type="button"
-              aria-pressed={config.translationMode === mode}
+              aria-pressed={config.readingMode === mode}
               onClick={() => {
                 void updateConfig({
-                  translationMode: mode as TranslationMode,
+                  readingMode: mode as ReadingMode,
+                  translationMode:
+                    mode === "quick" ? "translation" : "dual",
+                  hoverTranslateDirectly: mode !== "quick",
                 }).catch(console.error);
               }}
             >
-              {t(mode === "dual" ? "mode.dual" : "mode.translation")}
+              {t(`mode.${mode}`)}
             </button>
           ))}
         </div>

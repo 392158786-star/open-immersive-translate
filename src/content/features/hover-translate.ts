@@ -25,7 +25,9 @@ function findBlock(
 
 /** Install modifier-key hover translation. */
 export function init(ctx: FeatureContext): () => void {
-  if (!ctx.config.hover.enabled) return () => undefined;
+  if (ctx.config.readingMode === "quick" || !ctx.config.hover.enabled) {
+    return () => undefined;
+  }
 
   const blockTags = new Set(
     (ctx.rule.allBlockTags ?? []).map((tag) => tag.toUpperCase()),

@@ -25,6 +25,7 @@ export interface AcademicResolveMessage {
   context: string;
   title?: string;
   url?: string;
+  domain?: string;
   service?: string;
 }
 

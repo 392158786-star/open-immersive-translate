@@ -9,7 +9,10 @@ import {
   type AssistantClient,
 } from "../../shared/k-assistant";
 import { LANGUAGE_CODES } from "../../shared/lang";
-import type { LangCode, TranslationMode } from "../../shared/types";
+import type {
+  LangCode,
+  ReadingMode,
+} from "../../shared/types";
 import { Button, Field, Select } from "../shared/components";
 import {
   languageName,
@@ -343,14 +346,21 @@ export function SidePanel({ assistant }: SidePanelProps): preact.JSX.Element {
               <Field label={t("popup.mode")} htmlFor="side-mode">
                 <Select
                   id="side-mode"
-                  value={config.translationMode}
+                  value={config.readingMode}
                   options={[
-                    { value: "dual", label: t("mode.dual") },
-                    { value: "translation", label: t("mode.translation") },
+                    { value: "quick", label: t("mode.quick") },
+                    {
+                      value: "professional",
+                      label: t("mode.professional"),
+                    },
+                    { value: "research", label: t("mode.research") },
                   ]}
                   onChange={(mode) =>
                     void updateConfig({
-                      translationMode: mode as TranslationMode,
+                      readingMode: mode as ReadingMode,
+                      translationMode:
+                        mode === "quick" ? "translation" : "dual",
+                      hoverTranslateDirectly: mode !== "quick",
                     })
                   }
                 />

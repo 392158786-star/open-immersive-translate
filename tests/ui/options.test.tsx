@@ -16,6 +16,7 @@ const browserMock = vi.hoisted(() => ({
     local: {
       get: vi.fn(),
       set: vi.fn(),
+      remove: vi.fn(),
     },
     onChanged: {
       addListener: vi.fn(),
@@ -44,6 +45,7 @@ beforeEach(() => {
   browserMock.storage.local.set.mockReset();
   browserMock.storage.onChanged.addListener.mockReset();
   browserMock.storage.onChanged.removeListener.mockReset();
+  browserMock.storage.local.remove.mockReset().mockResolvedValue(undefined);
   browserMock.commands.getAll.mockReset().mockResolvedValue(
     EXTENSION_COMMAND_IDS.map((name, index) => ({
       name,
@@ -103,6 +105,21 @@ describe("Options", () => {
         type: "testService",
         serviceId: "openai-compatible",
       }),
+    );
+  });
+
+  it("resets the floating ball position from basic settings", async () => {
+    render(<Options />);
+
+    await screen.findByRole("heading", { name: "基本", level: 2 });
+    fireEvent.click(
+      screen.getByRole("button", { name: "重置悬浮球位置" }),
+    );
+
+    await waitFor(() =>
+      expect(browserMock.storage.local.remove).toHaveBeenCalledWith(
+        "floatBallPos",
+      ),
     );
   });
 

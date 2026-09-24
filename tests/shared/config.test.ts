@@ -14,6 +14,7 @@ describe("configuration migration", () => {
     expect(DEFAULT_CONFIG.service).toBe("transmart");
     expect(DEFAULT_CONFIG.targetLanguage).toBe("zh-CN");
     expect(DEFAULT_CONFIG.translationMode).toBe("translation");
+    expect(DEFAULT_CONFIG.readingMode).toBe("quick");
     expect(DEFAULT_CONFIG.translateToPageEndImmediately).toBe(true);
     expect(DEFAULT_CONFIG.removeDuplicateTranslations).toBe(true);
     expect(DEFAULT_CONFIG.translationIntegrityMode).toBe(true);
@@ -81,6 +82,18 @@ describe("configuration migration", () => {
       enabled: true,
       fallbackService: "youdao-free",
     });
+  });
+
+  it("maps the legacy dual mode to the professional reading mode", () => {
+    const migrated = migrateConfig({
+      ...DEFAULT_CONFIG,
+      version: 14,
+      readingMode: undefined,
+      translationMode: "dual",
+    });
+
+    expect(migrated.version).toBe(CONFIG_VERSION);
+    expect(migrated.readingMode).toBe("professional");
   });
 
   it("switches version 5 profiles to in-place Chinese replacement", () => {

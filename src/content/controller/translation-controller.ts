@@ -808,8 +808,11 @@ export class TranslationController implements PageControllerActions {
         }
       }
     }
+    const quickMode = this.currentReadingMode() === "quick";
+    if (this.immediate || quickMode) {
+      this.collectMissedProse(queued, quickMode);
+    }
     if (this.immediate) {
-      this.collectMissedProse(queued);
       await this.translateIdsImmediately(queued);
     } else {
       for (const id of queued) {
@@ -820,13 +823,15 @@ export class TranslationController implements PageControllerActions {
     this.emitState();
   }
 
-  private collectMissedProse(queued: string[]): void {
-    if (!this.immediate || !document.body) return;
+  private collectMissedProse(queued: string[], force = false): void {
+    if (!this.immediate && !force) return;
+    const root = this.scanRoot();
+    if (!(root instanceof Element)) return;
     const knownContainers = new Set(
       [...this.paragraphs.values()].map(({ container }) => container),
     );
     const candidates = Array.from(
-      document.body.querySelectorAll<HTMLElement>(
+      root.querySelectorAll<HTMLElement>(
         "p, li, h1, h2, h3, h4, h5, h6, blockquote, td, th",
       ),
     ).filter((element) => {

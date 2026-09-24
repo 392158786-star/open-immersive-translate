@@ -209,6 +209,7 @@ export class TranslationController implements PageControllerActions {
     this.videoSubtitlePreTranslation = this.config.subtitle.preTranslation;
     this.reportState = options.reportState;
     this.injectPageStyles();
+    this.syncQuickModeFlag();
     setRenderedMask(document, this.mask);
     this.connect();
     this.installMutationObserver();
@@ -267,6 +268,7 @@ export class TranslationController implements PageControllerActions {
     if (this.active || this.destroyed) return;
     this.active = true;
     this.scope = scope;
+    this.syncQuickModeFlag();
     setScrollAnchorSuppression(true);
     this.injectPageStyles();
     if (!this.immediate) {
@@ -322,6 +324,7 @@ export class TranslationController implements PageControllerActions {
     }).catch(() => undefined);
     setRenderedReadingMode(document, mode);
     if (translationMode !== "translation") this.restoreHiddenSources();
+    this.syncQuickModeFlag();
     this.installDirectHover();
   }
 
@@ -388,6 +391,7 @@ export class TranslationController implements PageControllerActions {
     this.runtimeReadingMode = undefined;
     this.runtimeService = undefined;
     this.injectPageStyles();
+    this.syncQuickModeFlag();
     setRenderedMask(document, this.mask);
     this.installMutationObserver();
     this.installScrollTranslation();
@@ -448,6 +452,7 @@ export class TranslationController implements PageControllerActions {
 
   removeAll(): void {
     this.active = false;
+    this.syncQuickModeFlag();
     this.generation += 1;
     this.viewport?.disconnect();
     this.viewport = undefined;
@@ -550,6 +555,12 @@ export class TranslationController implements PageControllerActions {
       ) === "translation"
         ? "quick"
         : "professional")
+    );
+  }
+
+  private syncQuickModeFlag(): void {
+    document.documentElement.dataset.imtQuickMode = String(
+      this.active && this.currentReadingMode() === "quick",
     );
   }
 

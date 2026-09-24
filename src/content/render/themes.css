@@ -52,6 +52,11 @@
   display: none !important;
 }
 
+html[data-imt-quick-mode="true"]
+  :is(h1, h2, h3, h4, h5, h6, p, li, blockquote, td, th):not([data-imt-id]) {
+  display: none !important;
+}
+
 .imt-academic-term {
   border-bottom: 1px dotted currentColor !important;
   cursor: help !important;

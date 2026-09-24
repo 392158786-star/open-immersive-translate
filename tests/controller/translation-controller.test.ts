@@ -134,6 +134,21 @@ describe("TranslationController", () => {
     controller.destroy();
   });
 
+  it("tracks quick mode globally for source suppression", () => {
+    const controller = new TranslationController(config(), generalRule);
+    controller.start("whole");
+    expect(document.documentElement.dataset.imtQuickMode).toBe("true");
+
+    controller.setReadingMode("professional");
+    expect(document.documentElement.dataset.imtQuickMode).toBe("false");
+
+    controller.setReadingMode("quick");
+    expect(document.documentElement.dataset.imtQuickMode).toBe("true");
+    controller.removeAll();
+    expect(document.documentElement.dataset.imtQuickMode).toBe("false");
+    controller.destroy();
+  });
+
   it("translates only main prose and sends domain glossary plus page context", async () => {
     vi.useFakeTimers();
     document.title = "Test article";

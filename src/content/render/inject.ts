@@ -689,7 +689,12 @@ export function resolveAutomaticTranslationColor(element: Element): string {
 
   // Blue source text gets a neutral translation so the two layers stay
   // distinguishable.
-  if (foreground && isBlueText(foreground)) return "#000000";
+  if (
+    (foreground && isBlueText(foreground)) ||
+    isBlueText(background)
+  ) {
+    return "#000000";
+  }
 
   const sourceIsDark = foreground
     ? relativeLuminance(foreground) < 0.34

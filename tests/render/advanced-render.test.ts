@@ -71,6 +71,7 @@ describe("advanced translation rendering", () => {
       <div style="background-color: rgb(0, 0, 0)"><p id="dark">Dark source</p></div>
       <div style="background-color: rgb(23, 23, 27)"><p id="near-black">Near-black source</p></div>
       <div style="background-color: rgb(0, 0, 0)"><p id="transparent" style="background-color: transparent">Transparent source</p></div>
+      <div style="background-color: rgb(31, 111, 235)"><p id="blue-bg">Blue background source</p></div>
       <div style="background-color: rgb(255, 255, 255)"><p id="light">Light source</p></div>`;
     const render = (id: string): HTMLElement => {
       const container = document.querySelector(`#${id}`)!;
@@ -101,6 +102,9 @@ describe("advanced translation rendering", () => {
     expect(
       render("transparent").style.getPropertyValue("--imt-target-color"),
     ).toBe("#4da3ff");
+    expect(
+      render("blue-bg").style.getPropertyValue("--imt-target-color"),
+    ).toBe("#000000");
     expect(render("light").style.getPropertyValue("--imt-target-color")).toBe(
       "#4da3ff",
     );

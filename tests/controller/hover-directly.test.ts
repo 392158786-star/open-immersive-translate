@@ -150,6 +150,41 @@ describe("context hover translation", () => {
     targetDispose();
   });
 
+  it("shows a collectible card while knowledge resolution is pending", async () => {
+    vi.useFakeTimers();
+    document.body.innerHTML =
+      '<p><font data-imt="source">Pending source word.</font></p>';
+    const source = document.querySelector<HTMLElement>(
+      'font[data-imt="source"]',
+    )!;
+    stubPoint(source.firstChild as Text);
+    stubElementFromPoint(source);
+    const dispose = installDirectHoverTranslation(
+      vi.fn(() => new Promise<never>(() => undefined)),
+      { delayMs: 500 },
+    );
+
+    source.dispatchEvent(
+      new MouseEvent("mousemove", {
+        bubbles: true,
+        clientX: 20,
+        clientY: 30,
+      }),
+    );
+    await vi.advanceTimersByTimeAsync(500);
+
+    const host = document.querySelector<HTMLElement>(
+      '[data-imt="context-card"]',
+    );
+    const button = host?.shadowRoot?.querySelector<HTMLButtonElement>(
+      'button[data-action="bookmark-word"]',
+    );
+    expect(host).not.toBeNull();
+    expect(button?.disabled).toBe(false);
+    expect(button?.dataset.state).toBe("uncollected");
+    dispose();
+  });
+
   it("passes resolved knowledge to the bookmark callback and marks the word collected", async () => {
     vi.useFakeTimers();
     document.body.innerHTML = `

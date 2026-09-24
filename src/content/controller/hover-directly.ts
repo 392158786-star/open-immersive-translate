@@ -237,6 +237,7 @@ function renderCard(
   host: HTMLElement,
   request: HoverContextRequest,
   knowledge: AcademicTermKnowledge,
+  pending = false,
 ): void {
   const shadow = host.shadowRoot;
   if (!shadow) return;
@@ -284,10 +285,10 @@ function renderCard(
     <article class="card" data-expanded="false" role="dialog" aria-label="${escapeHtml(request.word)}">
       <header>
         <strong>${escapeHtml(knowledge.term || request.word)}</strong>
-        <span class="translation">${escapeHtml(knowledge.translation || request.word)}</span>
+        <span class="translation">${escapeHtml(pending ? "解析中…" : knowledge.translation || request.word)}</span>
       </header>
       <div class="domain">${escapeHtml(knowledge.domain || request.domain)}</div>
-      <div class="definition">${escapeHtml(knowledge.definition || request.sentence)}</div>
+      <div class="definition">${escapeHtml(pending ? "正在结合上下文查询释义…" : knowledge.definition || request.sentence)}</div>
       <div class="details">
         <div class="summary">${escapeHtml(knowledge.summary)}</div>
         ${
@@ -344,13 +345,14 @@ export function installDirectHoverTranslation(
   const showCard = (
     request: HoverContextRequest,
     knowledge: AcademicTermKnowledge,
+    pending = false,
   ): void => {
     host?.remove();
     host = document.createElement("div");
     host.dataset.imt = "context-card";
     const shadow = host.attachShadow({ mode: "open" });
     document.documentElement.append(host);
-    renderCard(host, request, knowledge);
+    renderCard(host, request, knowledge, pending);
     placeCard(host, request.clientX, request.clientY);
     const card = shadow.querySelector<HTMLElement>(".card");
     card?.addEventListener("click", (event) => {
@@ -436,10 +438,27 @@ export function installDirectHoverTranslation(
         localPoint.y,
       );
       const requestSequence = ++sequence;
+      showCard(
+        request,
+        {
+          id: "",
+          term: word.word,
+          translation: "",
+          definition: "",
+          domain: request.domain,
+          aliases: [],
+          summary: "",
+          confidence: 0,
+          sources: [],
+          contexts: [request.sentence],
+          updatedAt: Date.now(),
+        },
+        true,
+      );
       void resolve(request)
         .then((knowledge) => {
           if (requestSequence !== sequence || !knowledge) return;
-          showCard(request, knowledge);
+          showCard(request, knowledge, false);
         })
         .catch(() => undefined);
     }, delay);

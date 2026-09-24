@@ -215,4 +215,25 @@ describe("float ball", () => {
     });
     dispose();
   });
+
+  it("marks the active mode and exits it when clicked again", () => {
+    const ctx = context();
+    ctx.isTranslated = vi.fn(() => true);
+    (ctx.config as FeatureContext["config"]).readingMode = "professional";
+    const dispose = init(ctx);
+    const host = document.querySelector<HTMLElement>(
+      '[data-imt="float-ball"]',
+    )!;
+    const style = host.shadowRoot!.querySelector("style")?.textContent ?? "";
+    const professional = host.shadowRoot!.querySelector<HTMLButtonElement>(
+      '[data-action="professional"]',
+    )!;
+
+    expect(style).toContain("background: #2563eb");
+    expect(professional.dataset.active).toBe("true");
+
+    professional.click();
+    expect(ctx.toggleTranslate).toHaveBeenCalledWith();
+    dispose();
+  });
 });

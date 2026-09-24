@@ -144,6 +144,7 @@ export async function init(): Promise<() => void> {
       },
       translateText: (text, from, to) => current.translateText(text, from, to),
       translateParagraph: (container) => current.translateParagraph(container),
+      setReadingMode: (mode) => current.setReadingMode(mode),
       toggleTranslate: (scope) => current.toggleTranslate(scope),
       isTranslated: () => current.isTranslated(),
     };

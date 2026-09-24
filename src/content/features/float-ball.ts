@@ -162,8 +162,8 @@ export function init(ctx: FeatureContext): () => void {
       }
       .menu button:hover { background: #f3f4f6; }
       .menu button[data-active="true"] {
-        color: #1d4ed8;
-        background: #eff6ff;
+        color: #ffffff;
+        background: #2563eb;
         font-weight: 600;
       }
       @media print { :host { display: none !important; } }
@@ -371,17 +371,30 @@ export function init(ctx: FeatureContext): () => void {
       action === "research"
     ) {
       const readingMode = action;
-      void sendToBackground({
-        type: "setConfig",
-        patch: {
-          translateMainOnly: false,
-          readingMode,
-          translationMode: action === "quick" ? "translation" : "dual",
-          hoverTranslateDirectly: action !== "quick",
-        },
-      }).catch(() => undefined);
+      const activeMode =
+        ctx.isTranslated() && ctx.config.readingMode === readingMode;
+      if (activeMode) {
+        ctx.toggleTranslate();
+        button.setAttribute("aria-pressed", "false");
+        refreshMenuState();
+        return;
+      }
+      if (ctx.setReadingMode) {
+        ctx.setReadingMode(readingMode);
+      } else {
+        void sendToBackground({
+          type: "setConfig",
+          patch: {
+            translateMainOnly: false,
+            readingMode,
+            translationMode: readingMode === "quick" ? "translation" : "dual",
+            hoverTranslateDirectly: readingMode !== "quick",
+          },
+        }).catch(() => undefined);
+      }
       if (!ctx.isTranslated()) ctx.toggleTranslate("whole");
       button.setAttribute("aria-pressed", "true");
+      refreshMenuState();
       return;
     }
   };

@@ -108,6 +108,19 @@ describe("SidePanel", () => {
     });
 
     fireEvent.click(screen.getByRole("tab", { name: "本页" }));
-    expect(await screen.findByRole("button", { name: "收藏" })).toBeTruthy();
+    expect(await screen.findByText("Article")).toBeTruthy();
+  });
+
+  it("renders exactly three tabs and no collection tab", async () => {
+    const assistant: AssistantClient = {
+      complete: vi.fn().mockResolvedValue(""),
+      supportsStreaming: vi.fn().mockResolvedValue(false),
+      stream: vi.fn().mockResolvedValue(""),
+    };
+    render(<SidePanel assistant={assistant} />);
+    expect(await screen.findByRole("tab", { name: "翻译" })).toBeTruthy();
+    expect(screen.getByRole("tab", { name: "对话" })).toBeTruthy();
+    expect(screen.getByRole("tab", { name: "本页" })).toBeTruthy();
+    expect(screen.queryByRole("tab", { name: "收藏" })).toBeNull();
   });
 });

@@ -14,6 +14,10 @@ import {
 } from "../../shared/messages";
 import { normalizeLang } from "../../shared/lang";
 import { lookupLocalUiPhrase } from "../../shared/local-ui-phrases";
+import {
+  canonicalArticleId,
+  normalizedWordKey,
+} from "../../shared/learning-identity";
 import type {
   AcademicTermKnowledge,
   Config,
@@ -60,6 +64,7 @@ import {
   installDirectHoverTranslation,
   type HoverContextRequest,
 } from "./hover-directly";
+import { initWordCollection } from "../features/word-collection";
 import { buildPageContext } from "./page-context";
 import {
   removeDuplicateTranslation,
@@ -149,6 +154,7 @@ export class TranslationController implements PageControllerActions {
   private renderFlushTimer?: ReturnType<typeof setTimeout>;
   private stopEditing?: () => void;
   private stopDirectHover?: () => void;
+  private stopWordCollection?: () => void;
   private scrollActive = false;
   private readonly paragraphs = new Map<string, AdvancedParagraph>();
   private readonly pendingIds = new Set<string>();
@@ -216,6 +222,7 @@ export class TranslationController implements PageControllerActions {
     this.installScrollTranslation();
     this.installEditing();
     this.installDirectHover();
+    this.installWordCollection();
     this.emitState();
   }
 
@@ -397,6 +404,7 @@ export class TranslationController implements PageControllerActions {
     this.installScrollTranslation();
     this.installEditing();
     this.installDirectHover();
+    this.installWordCollection();
     if (wasActive) this.start(scope);
   }
 
@@ -506,6 +514,7 @@ export class TranslationController implements PageControllerActions {
     setTranslationScrollActive(false);
     this.stopEditing?.();
     this.stopDirectHover?.();
+    this.stopWordCollection?.();
     if (this.reconnectTimer !== undefined) clearTimeout(this.reconnectTimer);
     this.port?.disconnect();
     this.port = undefined;
@@ -717,32 +726,10 @@ export class TranslationController implements PageControllerActions {
     this.stopDirectHover = installDirectHoverTranslation(
       (request) => this.resolveHoverKnowledge(request),
       {
+        getBookmarkState: (request) =>
+          this.currentWordBookmarkState(request.word, request.title),
         onBookmarkWord: (request, knowledge) =>
-          sendToBackground({
-            type: "learningSaveWord",
-            url: window.location.href,
-            title: request.title,
-            domain: request.domain,
-            word: request.word,
-            sentence: request.sentence,
-            previousSentence: request.previousSentence,
-            nextSentence: request.nextSentence,
-            paragraphTheme: request.paragraphTheme,
-            translation: knowledge.translation,
-            partOfSpeech: knowledge.partOfSpeech,
-            definition: knowledge.definition,
-            knowledgeId: knowledge.id,
-            sourceUrl: knowledge.sources[0]?.url,
-          })
-            .then(() => true)
-            .catch(() => false),
-        onBookmarkArticle: (request) => {
-          void sendToBackground({
-            type: "learningSaveArticle",
-            url: window.location.href,
-            title: request.title,
-          }).catch(() => undefined);
-        },
+          this.toggleBookmarkWord(request, knowledge),
         onOpenSource: (knowledge) => {
           const source = knowledge.sources[0]?.url;
           if (source) {
@@ -756,6 +743,67 @@ export class TranslationController implements PageControllerActions {
         },
       },
     );
+  }
+
+  private async currentWordBookmarkState(
+    word: string,
+    title: string,
+  ): Promise<"collected" | "uncollected"> {
+    const articleId = await canonicalArticleId(window.location.href, title);
+    const key = await normalizedWordKey(word);
+    const response = await sendToBackground({
+      type: "learningListWords",
+      articleId,
+    });
+    return response.words.some((saved) => saved.normalizedKey === key)
+      ? "collected"
+      : "uncollected";
+  }
+
+  private async toggleBookmarkWord(
+    request: HoverContextRequest,
+    knowledge: AcademicTermKnowledge,
+  ): Promise<"collected" | "uncollected"> {
+    const articleId = await canonicalArticleId(
+      window.location.href,
+      request.title,
+    );
+    const key = await normalizedWordKey(request.word);
+    const response = await sendToBackground({
+      type: "learningListWords",
+      articleId,
+    });
+    const matches = response.words.filter(
+      (saved) => saved.normalizedKey === key,
+    );
+    if (matches.length) {
+      for (const saved of matches) {
+        await sendToBackground({ type: "learningRemoveWord", wordId: saved.id });
+      }
+      return "uncollected";
+    }
+    await sendToBackground({
+      type: "learningSaveWord",
+      url: window.location.href,
+      title: request.title,
+      domain: request.domain,
+      word: request.word,
+      sentence: request.sentence,
+      previousSentence: request.previousSentence,
+      nextSentence: request.nextSentence,
+      paragraphTheme: request.paragraphTheme,
+      translation: knowledge.translation,
+      partOfSpeech: knowledge.partOfSpeech,
+      definition: knowledge.definition,
+      knowledgeId: knowledge.id,
+      sourceUrl: knowledge.sources[0]?.url,
+    });
+    return "collected";
+  }
+
+  private installWordCollection(): void {
+    this.stopWordCollection?.();
+    this.stopWordCollection = initWordCollection();
   }
 
   private async resolveHoverKnowledge(

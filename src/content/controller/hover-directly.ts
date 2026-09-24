@@ -15,13 +15,18 @@ export interface HoverContextRequest {
   clientY: number;
 }
 
+export type BookmarkState = "collected" | "uncollected";
+
 export interface DirectHoverOptions {
   delayMs?: number;
+  getBookmarkState?(
+    request: HoverContextRequest,
+    knowledge: AcademicTermKnowledge,
+  ): BookmarkState | Promise<BookmarkState>;
   onBookmarkWord?(
     request: HoverContextRequest,
     knowledge: AcademicTermKnowledge,
-  ): void | Promise<boolean>;
-  onBookmarkArticle?(request: HoverContextRequest): void;
+  ): void | Promise<BookmarkState>;
   onOpenSource?(knowledge: AcademicTermKnowledge): void;
 }
 
@@ -199,6 +204,34 @@ function escapeHtml(value: string): string {
     .replaceAll("'", "&#39;");
 }
 
+const BOOKMARK_OUTLINE_ICON =
+  '<svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path d="M6 3h12a1 1 0 0 1 1 1v17l-7-4-7 4V4a1 1 0 0 1 1-1z" fill="none" stroke="currentColor" stroke-width="1.5"/></svg>';
+const BOOKMARK_FILLED_ICON =
+  '<svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path d="M6 3h12a1 1 0 0 1 1 1v17l-7-4-7 4V4a1 1 0 0 1 1-1z" fill="currentColor"/></svg>';
+
+function setBookmarkButton(
+  button: HTMLButtonElement,
+  state: BookmarkState | "saving",
+): void {
+  if (state === "saving") {
+    button.dataset.state = "saving";
+    button.disabled = true;
+    button.setAttribute("aria-label", "保存中");
+    button.innerHTML = `${BOOKMARK_OUTLINE_ICON}<span>保存中…</span>`;
+    return;
+  }
+  button.disabled = false;
+  if (state === "collected") {
+    button.dataset.state = "collected";
+    button.setAttribute("aria-label", "已收藏");
+    button.innerHTML = `${BOOKMARK_FILLED_ICON}<span>已收藏</span>`;
+    return;
+  }
+  button.dataset.state = "uncollected";
+  button.setAttribute("aria-label", "收藏词语");
+  button.innerHTML = `${BOOKMARK_OUTLINE_ICON}<span>收藏词语</span>`;
+}
+
 function renderCard(
   host: HTMLElement,
   request: HoverContextRequest,
@@ -243,6 +276,9 @@ function renderCard(
         padding: 5px 7px;
       }
       button:hover { border-color: #175cd3; color: #175cd3; }
+      button[data-state] { display: inline-flex; align-items: center; gap: 4px; }
+      button[disabled] { opacity: 0.6; cursor: default; }
+      button[data-state="collected"] { color: #175cd3; border-color: #175cd3; }
     </style>
     <article class="card" data-expanded="false" role="dialog" aria-label="${escapeHtml(request.word)}">
       <header>
@@ -259,8 +295,7 @@ function renderCard(
             : ""
         }
         <div class="actions">
-          <button type="button" data-action="bookmark-word">收藏词语</button>
-          <button type="button" data-action="bookmark-article">收藏文章</button>
+          <button type="button" data-action="bookmark-word" data-state="uncollected" aria-label="收藏词语">${BOOKMARK_OUTLINE_ICON}<span>收藏词语</span></button>
           <button type="button" data-action="open-source">查看原文出处</button>
         </div>
       </div>
@@ -316,38 +351,54 @@ export function installDirectHoverTranslation(
     document.documentElement.append(host);
     renderCard(host, request, knowledge);
     placeCard(host, request.clientX, request.clientY);
-    shadow.querySelector<HTMLElement>(".card")?.addEventListener("click", (event) => {
+    const card = shadow.querySelector<HTMLElement>(".card");
+    card?.addEventListener("click", (event) => {
       const target = event.target as HTMLElement | null;
-      const action = target?.dataset.action;
+      const actionElement =
+        target?.closest<HTMLElement>("[data-action]") ?? null;
+      const action = actionElement?.dataset.action;
       if (action === "bookmark-word") {
-        const button = target instanceof HTMLButtonElement ? target : null;
+        const button = actionElement as HTMLButtonElement;
+        if (button.disabled) return;
+        setBookmarkButton(button, "saving");
         const result = options.onBookmarkWord?.(request, knowledge);
         if (result instanceof Promise) {
           void result
-            .then((saved) => {
-              if (saved && button) {
-                button.textContent = "已收藏";
-                button.disabled = true;
-              }
+            .then((state) => {
+              if (button.isConnected) setBookmarkButton(button, state);
             })
-            .catch(() => undefined);
+            .catch(() => {
+              if (button.isConnected) setBookmarkButton(button, "uncollected");
+            });
+        } else if (result) {
+          setBookmarkButton(button, result);
         }
-        return;
-      }
-      if (action === "bookmark-article") {
-        options.onBookmarkArticle?.(request);
         return;
       }
       if (action === "open-source") {
         options.onOpenSource?.(knowledge);
         return;
       }
-      const card = shadow.querySelector<HTMLElement>(".card");
       if (!card) return;
       const next = card.dataset.expanded !== "true";
       card.dataset.expanded = String(next);
       placeCard(host!, request.clientX, request.clientY);
     });
+
+    if (options.getBookmarkState) {
+      const bookmarkButton = shadow.querySelector<HTMLButtonElement>(
+        'button[data-action="bookmark-word"]',
+      );
+      if (bookmarkButton) {
+        void Promise.resolve(options.getBookmarkState(request, knowledge))
+          .then((state) => {
+            if (bookmarkButton.isConnected) {
+              setBookmarkButton(bookmarkButton, state);
+            }
+          })
+          .catch(() => undefined);
+      }
+    }
   };
 
   const onMouseMove = (event: MouseEvent): void => {

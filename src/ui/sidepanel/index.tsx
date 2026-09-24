@@ -9,7 +9,6 @@ import {
   type AssistantClient,
 } from "../../shared/k-assistant";
 import { LANGUAGE_CODES } from "../../shared/lang";
-import { sendToBackground } from "../../shared/messages";
 import type { LangCode, ReadingMode } from "../../shared/types";
 import { Button, Field, Select } from "../shared/components";
 import {
@@ -19,12 +18,6 @@ import {
   t,
 } from "../shared/i18n";
 import { useKConfig } from "../shared/k-config";
-import {
-  hostnameOf,
-  LearningPanel,
-  useLearningState,
-  type CollectionSegment,
-} from "./learning-panel";
 import "../shared/styles.css";
 import "./sidepanel.css";
 
@@ -50,7 +43,7 @@ interface SidePanelProps {
   assistant?: AssistantClient;
 }
 
-type PanelTab = "translate" | "chat" | "page" | "collection";
+type PanelTab = "translate" | "chat" | "page";
 
 export function SidePanel({ assistant }: SidePanelProps): preact.JSX.Element {
   const client = useMemo(
@@ -70,14 +63,6 @@ export function SidePanel({ assistant }: SidePanelProps): preact.JSX.Element {
   const [messages, setMessages] = useState<AssistantChatMessage[]>([]);
   const [selectedText, setSelectedText] = useState("");
   const [status, setStatus] = useState<string>();
-  const learning = useLearningState();
-  const [segment, setSegment] = useState<CollectionSegment>("articles");
-  const [articleFilterId, setArticleFilterId] = useState<string>();
-
-  const currentArticle = useMemo(
-    () => learning.articles.find((article) => article.url === page?.url),
-    [learning.articles, page?.url],
-  );
 
   useEffect(() => {
     void activeBrowserTab().then(async (tab) => {
@@ -203,29 +188,6 @@ export function SidePanel({ assistant }: SidePanelProps): preact.JSX.Element {
     await sendChat(`请解释下面这段内容：\n\n${text}`);
   };
 
-  const collectCurrentArticle = async (): Promise<void> => {
-    if (!page) return;
-    if (currentArticle?.saved) {
-      await sendToBackground({
-        type: "learningRemoveArticle",
-        articleId: currentArticle.id,
-      });
-    } else {
-      await sendToBackground({
-        type: "learningSaveArticle",
-        url: page.url,
-        title: page.title,
-      });
-    }
-    await learning.refresh();
-  };
-
-  const viewArticleWords = (articleId: string): void => {
-    setSegment("words");
-    setArticleFilterId(articleId);
-    setActiveTab("collection");
-  };
-
   const togglePage = async (): Promise<void> => {
     if (tabId === undefined || !page) return;
     await browser.tabs.sendMessage(tabId, {
@@ -244,7 +206,7 @@ export function SidePanel({ assistant }: SidePanelProps): preact.JSX.Element {
         </Button>
       </header>
       <nav class="side-tabs" role="tablist">
-        {(["translate", "chat", "page", "collection"] as const).map((panel) => (
+        {(["translate", "chat", "page"] as const).map((panel) => (
           <button
             key={panel}
             type="button"
@@ -365,40 +327,8 @@ export function SidePanel({ assistant }: SidePanelProps): preact.JSX.Element {
         <section class="side-panel" aria-label={t("side.pageState")}>
           {page ? (
             <>
-              <article class="learning-card">
-              <header class="learning-card-head">
-                <strong class="learning-card-title">
-                  {page.title || page.url}
-                </strong>
-                <span class="learning-card-host">{hostnameOf(page.url)}</span>
-              </header>
-              <div class="learning-card-actions">
-                <Button
-                  variant={currentArticle?.saved ? "danger" : "primary"}
-                  onClick={() => void collectCurrentArticle()}
-                >
-                  {currentArticle?.saved
-                    ? t("learning.uncollect")
-                    : t("learning.collect")}
-                </Button>
-                <Button
-                  variant="quiet"
-                  disabled
-                  title={t("learning.noScreenshot")}
-                >
-                  {t("learning.noScreenshot")}
-                </Button>
-                <Button
-                  variant="quiet"
-                  disabled={!currentArticle}
-                  onClick={() =>
-                    currentArticle && viewArticleWords(currentArticle.id)
-                  }
-                >
-                  {t("learning.viewWords")}
-                </Button>
-              </div>
-              </article>
+              <h2>{page.title || page.url}</h2>
+              <p class="side-url">{page.url}</p>
               <p>
                 {page.translated
                   ? t("side.pageTranslated")
@@ -437,17 +367,6 @@ export function SidePanel({ assistant }: SidePanelProps): preact.JSX.Element {
             <p class="ui-status">{t("side.loadFailed")}</p>
           )}
         </section>
-      )}
-
-      {activeTab === "collection" && (
-        <LearningPanel
-          state={learning}
-          segment={segment}
-          onSegmentChange={setSegment}
-          articleFilterId={articleFilterId}
-          onViewArticleWords={viewArticleWords}
-          onClearArticleFilter={() => setArticleFilterId(undefined)}
-        />
       )}
 
       {status && (

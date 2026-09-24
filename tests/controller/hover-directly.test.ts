@@ -97,7 +97,7 @@ describe("context hover translation", () => {
     dispose();
   });
 
-  it("passes resolved knowledge to the bookmark callback and marks the word saved", async () => {
+  it("passes resolved knowledge to the bookmark callback and marks the word collected", async () => {
     vi.useFakeTimers();
     document.body.innerHTML = `
       <article>
@@ -109,7 +109,7 @@ describe("context hover translation", () => {
     const textNode = paragraph.firstChild as Text;
     stubPoint(textNode);
     stubElementFromPoint(paragraph);
-    const onBookmarkWord = vi.fn().mockResolvedValue(true);
+    const onBookmarkWord = vi.fn().mockResolvedValue("collected");
     const dispose = installDirectHoverTranslation(
       vi.fn().mockResolvedValue(knowledge),
       { delayMs: 500, onBookmarkWord },
@@ -131,6 +131,11 @@ describe("context hover translation", () => {
       'button[data-action="bookmark-word"]',
     );
     expect(button).toBeTruthy();
+    expect(button?.dataset.state).toBe("uncollected");
+    expect(button?.getAttribute("aria-label")).toBe("收藏词语");
+    expect(
+      host?.shadowRoot?.querySelector('button[data-action="bookmark-article"]'),
+    ).toBeNull();
     button?.click();
 
     expect(onBookmarkWord).toHaveBeenCalledWith(
@@ -139,7 +144,46 @@ describe("context hover translation", () => {
     );
     await Promise.resolve();
     await Promise.resolve();
-    expect(button?.disabled).toBe(true);
+    expect(button?.dataset.state).toBe("collected");
+    expect(button?.getAttribute("aria-label")).toBe("已收藏");
+    dispose();
+  });
+
+  it("restores the collected state from getBookmarkState", async () => {
+    vi.useFakeTimers();
+    document.body.innerHTML = `
+      <article>
+        <h1>Reading mode</h1>
+        <p>Hover this paragraph in the article.</p>
+      </article>
+    `;
+    const paragraph = document.querySelector("p")!;
+    const textNode = paragraph.firstChild as Text;
+    stubPoint(textNode);
+    stubElementFromPoint(paragraph);
+    const dispose = installDirectHoverTranslation(
+      vi.fn().mockResolvedValue(knowledge),
+      { delayMs: 500, getBookmarkState: vi.fn().mockResolvedValue("collected") },
+    );
+
+    paragraph.dispatchEvent(
+      new MouseEvent("mousemove", {
+        bubbles: true,
+        clientX: 20,
+        clientY: 30,
+      }),
+    );
+    await vi.advanceTimersByTimeAsync(500);
+
+    const host = document.querySelector<HTMLElement>(
+      '[data-imt="context-card"]',
+    );
+    const button = host?.shadowRoot?.querySelector<HTMLButtonElement>(
+      'button[data-action="bookmark-word"]',
+    );
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(button?.dataset.state).toBe("collected");
     dispose();
   });
 });

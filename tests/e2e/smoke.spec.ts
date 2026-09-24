@@ -503,54 +503,69 @@ test("translates newly visible paragraphs after scrolling a long page", async ({
   }
 });
 
-test("shows the local collection panel with saved articles and words", async ({
+test("shows the current-page word collection drawer", async ({
   playwright,
 }) => {
   const { context, worker, extensionId } = await launchExtension(playwright);
   try {
     await selectMockService(worker);
-    const page = await context.newPage();
-    await page.goto(
+    const articleUrl = `${origin}/article.html`;
+    const helper = await context.newPage();
+    await helper.goto(
       `chrome-extension://${extensionId}/src/ui/sidepanel/index.html`,
     );
-    await page.evaluate(async () => {
-      const api = (
-        globalThis as unknown as {
-          chrome: {
-            runtime: {
-              sendMessage(message: unknown): Promise<unknown>;
+    await helper.evaluate(
+      async ({ url }) => {
+        const api = (
+          globalThis as unknown as {
+            chrome: {
+              runtime: {
+                sendMessage(message: unknown): Promise<unknown>;
+              };
             };
-          };
-        }
-      ).chrome;
-      await api.runtime.sendMessage({
-        type: "learningSaveArticle",
-        url: "https://example.com/article",
-        title: "Saved Article",
-      });
-      await api.runtime.sendMessage({
-        type: "learningSaveWord",
-        url: "https://example.com/article",
-        title: "Saved Article",
-        domain: "Computer science",
-        word: "algorithm",
-        sentence: "An algorithm is a set of steps.",
-        previousSentence: "",
-        nextSentence: "",
-        paragraphTheme: "Introduction",
-        translation: "algorithm translation",
-        partOfSpeech: "noun",
-        definition: "A procedure for solving a problem.",
-      });
-    });
+          }
+        ).chrome;
+        await api.runtime.sendMessage({
+          type: "learningSaveWord",
+          url,
+          title: "Translation smoke test",
+          domain: "Computer science",
+          word: "algorithm",
+          sentence: "An algorithm is a set of steps.",
+          previousSentence: "",
+          nextSentence: "",
+          paragraphTheme: "Introduction",
+          translation: "algorithm translation",
+          partOfSpeech: "noun",
+          definition: "A procedure for solving a problem.",
+        });
+      },
+      { url: articleUrl },
+    );
+    await expect(helper.getByRole("tab")).toHaveCount(3);
+    await helper.close();
 
-    await page.getByRole("tab").nth(3).click();
-    await expect(page.locator(".learning-panel")).toBeVisible();
-    await expect(page.getByText("Saved Article")).toBeVisible();
+    const page = await context.newPage();
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.goto(articleUrl);
+    const collection = page.locator('[data-imt="word-collection"]');
+    await expect(collection.locator(".handle")).toBeVisible();
+    await expect(collection.locator(".handle-count")).toHaveText("1");
 
-    await page.locator(".learning-segments button").nth(1).click();
-    await expect(page.getByText("algorithm", { exact: true })).toBeVisible();
-    await expect(page.getByText("noun", { exact: true })).toBeVisible();
+    const handleBox = await collection.locator(".handle").boundingBox();
+    expect(handleBox).not.toBeNull();
+    expect((handleBox?.x ?? 0) + (handleBox?.width ?? 0)).toBeGreaterThan(
+      1280 - 5,
+    );
+
+    await collection.locator(".handle").click();
+    await expect(collection.locator(".drawer")).toBeVisible();
+    await expect(collection.locator(".drawer-list")).toContainText("algorithm");
+    await collection.locator(".word-card").click();
+    await expect(collection.locator(".drawer-knowledge")).toBeVisible();
+    await expect(collection.locator(".drawer-knowledge")).toContainText(
+      "noun",
+    );
   } finally {
     await context.close();
   }

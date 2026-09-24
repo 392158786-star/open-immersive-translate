@@ -10,6 +10,7 @@ import {
   markTranslated,
   removeAll,
   renderTranslation,
+  resolveAutomaticTranslationColor,
   restoreRenderedScrollAnchor,
   segmentRenderedText,
   setError,
@@ -128,6 +129,19 @@ describe("renderTranslation", () => {
 
     toggle.click();
     expect(bodyTarget.style.display).not.toBe("none");
+  });
+
+  it("maps dark source text to blue and blue source text to black", () => {
+    document.body.style.background = "rgb(255, 255, 255)";
+    const dark = document.createElement("p");
+    dark.style.color = "rgb(20, 20, 20)";
+    document.body.append(dark);
+    expect(resolveAutomaticTranslationColor(dark)).toBe("#4da3ff");
+
+    const blue = document.createElement("p");
+    blue.style.color = "rgb(31, 111, 235)";
+    document.body.append(blue);
+    expect(resolveAutomaticTranslationColor(blue)).toBe("#000000");
   });
 
   it("shrinks constrained source text without shrinking the target", () => {

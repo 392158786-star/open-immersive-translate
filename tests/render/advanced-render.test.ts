@@ -66,7 +66,7 @@ describe("advanced translation rendering", () => {
     expect(target.style.getPropertyValue("--imt-target-line-height")).toBe("1.8");
   });
 
-  it("uses white text on black backgrounds and black text on light backgrounds", () => {
+  it("uses blue text on dark backgrounds and black text on light backgrounds", () => {
     document.body.innerHTML = `
       <div style="background-color: rgb(0, 0, 0)"><p id="dark">Dark source</p></div>
       <div style="background-color: rgb(23, 23, 27)"><p id="near-black">Near-black source</p></div>
@@ -93,16 +93,16 @@ describe("advanced translation rendering", () => {
     };
 
     expect(render("dark").style.getPropertyValue("--imt-target-color")).toBe(
-      "#ffffff",
+      "#4da3ff",
     );
     expect(
       render("near-black").style.getPropertyValue("--imt-target-color"),
-    ).toBe("#ffffff");
+    ).toBe("#4da3ff");
     expect(
       render("transparent").style.getPropertyValue("--imt-target-color"),
-    ).toBe("#ffffff");
+    ).toBe("#4da3ff");
     expect(render("light").style.getPropertyValue("--imt-target-color")).toBe(
-      "#000000",
+      "#4da3ff",
     );
   });
 

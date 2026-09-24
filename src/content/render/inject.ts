@@ -652,12 +652,52 @@ function effectiveBackgroundColor(element: Element): RgbaColor {
   return result;
 }
 
-/** Pick black on light backgrounds and white on black backgrounds. */
+function relativeLuminance(color: RgbaColor): number {
+  const channel = (value: number): number => {
+    const normalized = value / 255;
+    return normalized <= 0.03928
+      ? normalized / 12.92
+      : ((normalized + 0.055) / 1.055) ** 2.4;
+  };
+  return (
+    0.2126 * channel(color.r) +
+    0.7152 * channel(color.g) +
+    0.0722 * channel(color.b)
+  );
+}
+
+function isBlueText(color: RgbaColor): boolean {
+  const maximum = Math.max(color.r, color.g, color.b);
+  const minimum = Math.min(color.r, color.g, color.b);
+  const saturation =
+    maximum <= 0 ? 0 : (maximum - minimum) / maximum;
+  return (
+    color.b >= 90 &&
+    color.b > color.r * 1.25 &&
+    color.b >= color.g * 1.08 &&
+    saturation >= 0.32
+  );
+}
+
+/** Choose a readable target color from the source text and page background. */
 export function resolveAutomaticTranslationColor(element: Element): string {
   const background = effectiveBackgroundColor(element);
-  const isBlack =
-    background.r <= 32 && background.g <= 32 && background.b <= 32;
-  return isBlack ? "#ffffff" : "#000000";
+  const view = element.ownerDocument.defaultView;
+  const foreground = view
+    ? parseCssColor(view.getComputedStyle(element).color)
+    : undefined;
+
+  // Blue source text gets a neutral translation so the two layers stay
+  // distinguishable.
+  if (foreground && isBlueText(foreground)) return "#000000";
+
+  const sourceIsDark = foreground
+    ? relativeLuminance(foreground) < 0.34
+    : false;
+  const backgroundIsDark = relativeLuminance(background) < 0.24;
+  if (sourceIsDark || backgroundIsDark) return "#4da3ff";
+
+  return "#000000";
 }
 
 /** Capture the exact scroll position before rendering translations. */

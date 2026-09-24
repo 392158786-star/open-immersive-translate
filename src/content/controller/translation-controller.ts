@@ -1101,6 +1101,9 @@ export class TranslationController implements PageControllerActions {
   ): Promise<void> {
     const requestParagraphs: TranslatePortMessage["paragraphs"] = [];
     for (const paragraph of paragraphs) {
+      if (this.currentReadingMode() === "quick") {
+        this.hideFailedSource(paragraph);
+      }
       this.pendingIds.add(paragraph.id);
       this.errorIds.delete(paragraph.id);
       paragraph.translatedSegments = undefined;
@@ -1303,6 +1306,9 @@ export class TranslationController implements PageControllerActions {
     priority: TranslationPriority,
   ): Promise<void> {
     const generation = this.generation;
+    if (this.currentReadingMode() === "quick") {
+      this.hideFailedSource(paragraph);
+    }
     this.pendingIds.add(paragraph.id);
     this.errorIds.delete(paragraph.id);
     this.emitState();
@@ -1736,6 +1742,8 @@ export class TranslationController implements PageControllerActions {
         ? decodePlaceholders(text, paragraph.placeholders, PLACEHOLDER_STYLE)
         : document.createDocumentFragment();
       if (!decode) fragment.append(text);
+      this.hiddenSources.delete(paragraph.container);
+      paragraph.container.classList.remove("imt-source-hidden");
       const target = renderTranslation(paragraph as Paragraph, fragment, {
         mode: this.currentMode(),
         readingMode: this.currentReadingMode(),

@@ -5,6 +5,7 @@ import {
   canonicalArticleId,
   contextHash,
   hostnameFromUrl,
+  normalizeArticleUrl,
   normalizeWord,
   normalizedWordKey,
   routeLearningRequest,
@@ -46,12 +47,25 @@ describe("learning identity helpers", () => {
     expect(hostnameFromUrl("https://example.com/path")).toBe("example.com");
   });
 
-  it("derives deterministic canonical article IDs from URL and title", async () => {
+  it("derives stable article IDs from the canonical URL", async () => {
     const a = await canonicalArticleId("https://example.com/a", "Title");
     const b = await canonicalArticleId("https://example.com/a", "Title");
     expect(a).toBe(b);
-    const c = await canonicalArticleId("https://example.com/a", "Other");
-    expect(a).not.toBe(c);
+    const renamed = await canonicalArticleId(
+      "https://example.com/a?utm_source=test#section",
+      "Renamed title",
+    );
+    expect(renamed).toBe(a);
+    const other = await canonicalArticleId("https://example.com/b", "Title");
+    expect(other).not.toBe(a);
+  });
+
+  it("normalizes tracking parameters and URL fragments", () => {
+    expect(
+      normalizeArticleUrl(
+        "https://example.com/a?b=2&utm_source=news&a=1#section",
+      ),
+    ).toBe("https://example.com/a?a=1&b=2");
   });
 
   it("normalizes words and hashes context deterministically", async () => {

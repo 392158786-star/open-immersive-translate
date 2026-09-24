@@ -66,9 +66,30 @@ export function normalizeWord(value: string): string {
   return value.trim().normalize("NFKC").toLowerCase();
 }
 
-/** Deterministic article ID derived from URL and title. */
-export function canonicalArticleId(url: string, title: string): Promise<string> {
-  return sha256Hex(`${hostnameFromUrl(url)}|${url}|${title.trim()}`);
+const TRACKING_PARAMETER = /^(?:utm_.+|fbclid|gclid|mc_cid|mc_eid)$/iu;
+
+/** Remove navigation-only and campaign-only parts from an article URL. */
+export function normalizeArticleUrl(url: string): string {
+  try {
+    const parsed = new URL(url);
+    parsed.hash = "";
+    for (const key of [...parsed.searchParams.keys()]) {
+      if (TRACKING_PARAMETER.test(key)) parsed.searchParams.delete(key);
+    }
+    parsed.searchParams.sort();
+    return parsed.toString();
+  } catch {
+    return url.trim();
+  }
+}
+
+/** Deterministic article ID derived from the canonicalized URL. */
+export function canonicalArticleId(
+  url: string,
+  title = "",
+): Promise<string> {
+  void title;
+  return sha256Hex(`article|${normalizeArticleUrl(url)}`);
 }
 
 /** Deterministic normalized word key. */

@@ -45,6 +45,11 @@ export interface SavedWord extends LearningRecordBase {
   domain: string;
   from?: LangCode;
   to?: LangCode;
+  translation?: string;
+  partOfSpeech?: string;
+  definition?: string;
+  knowledgeId?: string;
+  sourceUrl?: string;
 }
 
 /** A website derived automatically from an article URL hostname. */
@@ -85,6 +90,11 @@ export interface SaveWordInput {
   paragraphTheme: string;
   from?: LangCode;
   to?: LangCode;
+  translation?: string;
+  partOfSpeech?: string;
+  definition?: string;
+  knowledgeId?: string;
+  sourceUrl?: string;
 }
 
 /** Input for adding a personal dictionary entry. */

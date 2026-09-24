@@ -429,6 +429,11 @@ export interface LearningSaveWordMessage {
   paragraphTheme: string;
   from?: LangCode;
   to?: LangCode;
+  translation?: string;
+  partOfSpeech?: string;
+  definition?: string;
+  knowledgeId?: string;
+  sourceUrl?: string;
 }
 
 /** Remove a collected word. */
@@ -475,6 +480,10 @@ export interface LearningGetDictionaryEntryMessage {
   to: LangCode;
 }
 
+export interface LearningListDictionaryEntriesMessage {
+  type: "learningListDictionaryEntries";
+}
+
 export interface LearningGetRevisionMessage {
   type: "learningGetRevision";
 }
@@ -496,6 +505,7 @@ export type LearningRequest =
   | LearningFindWordsByArticleMessage
   | LearningAddDictionaryEntryMessage
   | LearningGetDictionaryEntryMessage
+  | LearningListDictionaryEntriesMessage
   | LearningGetRevisionMessage;
 
 export interface LearningSaveArticleResult {
@@ -538,6 +548,10 @@ export interface LearningGetDictionaryEntryResult {
   entry: PersonalDictionaryEntry | null;
 }
 
+export interface LearningListDictionaryEntriesResult {
+  entries: PersonalDictionaryEntry[];
+}
+
 export interface LearningGetRevisionResult {
   revision: number;
 }
@@ -553,6 +567,7 @@ export type LearningResponse =
   | LearningFindWordsByArticleResult
   | LearningAddDictionaryEntryResult
   | LearningGetDictionaryEntryResult
+  | LearningListDictionaryEntriesResult
   | LearningGetRevisionResult;
 
 /** Acknowledgement for work submitted to a scheduler. */
@@ -631,11 +646,13 @@ export type BackgroundResponse<T extends BackgroundRequest> =
                                                 ? LearningFindWordsByArticleResult
                                                 : T extends LearningAddDictionaryEntryMessage
                                                   ? LearningAddDictionaryEntryResult
-                                                  : T extends LearningGetDictionaryEntryMessage
-                                                    ? LearningGetDictionaryEntryResult
-                                                    : T extends LearningGetRevisionMessage
-                                                      ? LearningGetRevisionResult
-                                                      : T extends PageTranslationStateMessage
+                                                    : T extends LearningGetDictionaryEntryMessage
+                                                      ? LearningGetDictionaryEntryResult
+                                                      : T extends LearningListDictionaryEntriesMessage
+                                                        ? LearningListDictionaryEntriesResult
+                                                        : T extends LearningGetRevisionMessage
+                                                          ? LearningGetRevisionResult
+                                                          : T extends PageTranslationStateMessage
                                                         ? PageTranslationStateAcknowledgement
                                                         : never;
 

@@ -717,8 +717,8 @@ export class TranslationController implements PageControllerActions {
     this.stopDirectHover = installDirectHoverTranslation(
       (request) => this.resolveHoverKnowledge(request),
       {
-        onBookmarkWord: (request) => {
-          void sendToBackground({
+        onBookmarkWord: (request, knowledge) =>
+          sendToBackground({
             type: "learningSaveWord",
             url: window.location.href,
             title: request.title,
@@ -728,8 +728,14 @@ export class TranslationController implements PageControllerActions {
             previousSentence: request.previousSentence,
             nextSentence: request.nextSentence,
             paragraphTheme: request.paragraphTheme,
-          }).catch(() => undefined);
-        },
+            translation: knowledge.translation,
+            partOfSpeech: knowledge.partOfSpeech,
+            definition: knowledge.definition,
+            knowledgeId: knowledge.id,
+            sourceUrl: knowledge.sources[0]?.url,
+          })
+            .then(() => true)
+            .catch(() => false),
         onBookmarkArticle: (request) => {
           void sendToBackground({
             type: "learningSaveArticle",

@@ -117,6 +117,7 @@ export interface AcademicTermKnowledge {
   translation: string;
   definition: string;
   domain: string;
+  partOfSpeech?: string;
   aliases: string[];
   summary: string;
   confidence: number;

@@ -17,7 +17,10 @@ export interface HoverContextRequest {
 
 export interface DirectHoverOptions {
   delayMs?: number;
-  onBookmarkWord?(request: HoverContextRequest): void;
+  onBookmarkWord?(
+    request: HoverContextRequest,
+    knowledge: AcademicTermKnowledge,
+  ): void | Promise<boolean>;
   onBookmarkArticle?(request: HoverContextRequest): void;
   onOpenSource?(knowledge: AcademicTermKnowledge): void;
 }
@@ -317,7 +320,18 @@ export function installDirectHoverTranslation(
       const target = event.target as HTMLElement | null;
       const action = target?.dataset.action;
       if (action === "bookmark-word") {
-        options.onBookmarkWord?.(request);
+        const button = target instanceof HTMLButtonElement ? target : null;
+        const result = options.onBookmarkWord?.(request, knowledge);
+        if (result instanceof Promise) {
+          void result
+            .then((saved) => {
+              if (saved && button) {
+                button.textContent = "已收藏";
+                button.disabled = true;
+              }
+            })
+            .catch(() => undefined);
+        }
         return;
       }
       if (action === "bookmark-article") {

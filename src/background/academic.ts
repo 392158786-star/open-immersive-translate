@@ -376,7 +376,7 @@ async function resolveWithAi(
       })),
     )}`,
     "只返回 JSON，不要 Markdown：",
-    '{"translation":"当前语境中的中文译名","definition":"中文定义","domain":"学科或领域","aliases":["别名"],"summary":"结合上下文和文献的一句话总结","confidence":0.0}',
+    '{"translation":"当前语境中的中文译名","definition":"中文定义","domain":"学科或领域","partOfSpeech":"词性","aliases":["别名"],"summary":"结合上下文和文献的一句话总结","confidence":0.0}',
     "confidence 范围为 0 到 1。若证据不足，降低 confidence，不得编造文献内容。",
   ].join("\n");
   const request: AssistantRequest = {
@@ -396,6 +396,7 @@ async function resolveWithAi(
       translation: stringValue(parsed.translation) ?? "",
       definition: stringValue(parsed.definition) ?? "",
       domain: stringValue(parsed.domain) ?? "",
+      partOfSpeech: stringValue(parsed.partOfSpeech) ?? "",
       aliases: stringArray(parsed.aliases),
       summary: stringValue(parsed.summary) ?? "",
       confidence:
@@ -481,6 +482,7 @@ export async function getAcademicKnowledge(
         ? `检索到相关文献，但未配置学术 AI，仅显示公开摘要：${firstSnippet}`
         : "未配置学术 AI，暂时无法进行上下文语义分析。"),
     domain: ai?.domain || "未确定",
+    partOfSpeech: ai?.partOfSpeech ?? "",
     aliases: ai?.aliases ?? [],
     summary:
       ai?.summary ||

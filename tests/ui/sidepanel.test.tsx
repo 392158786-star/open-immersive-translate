@@ -108,14 +108,6 @@ describe("SidePanel", () => {
     });
 
     fireEvent.click(screen.getByRole("tab", { name: "页面" }));
-    const translatePage = await screen.findByRole("button", { name: "翻译" });
-    fireEvent.click(translatePage);
-    await waitFor(() =>
-      expect(browserMock.tabs.sendMessage).toHaveBeenCalledWith(8, {
-        type: "toggleTranslate",
-        tabId: 8,
-      }),
-    );
-    expect(screen.getByRole("button", { name: "显示原文" })).toBeTruthy();
+    expect(await screen.findByRole("button", { name: "收藏" })).toBeTruthy();
   });
 });

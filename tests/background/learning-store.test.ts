@@ -234,6 +234,22 @@ describe("LearningStore", () => {
     );
     expect(await store.getLearningRevision()).toBe(8);
   });
+
+  it("preserves existing word knowledge when a later save omits it", async () => {
+    const store = makeStore();
+    const first = await store.saveWord(
+      wordInput({
+        translation: "algorithm",
+        partOfSpeech: "noun",
+        definition: "A procedure for solving a problem.",
+      }),
+    );
+    const second = await store.saveWord(wordInput());
+    expect(second.id).toBe(first.id);
+    expect(second.translation).toBe("algorithm");
+    expect(second.partOfSpeech).toBe("noun");
+    expect(second.definition).toBe("A procedure for solving a problem.");
+  });
 });
 
 describe("routeLearningRequest", () => {
@@ -255,5 +271,45 @@ describe("routeLearningRequest", () => {
     );
     expect(response).toMatchObject({ word: { word: "algorithm" } });
     expect(await store.listWords()).toHaveLength(1);
+  });
+
+  it("persists word knowledge fields through the save-word route", async () => {
+    const store = makeStore();
+    const response = await routeLearningRequest(
+      {
+        type: "learningSaveWord",
+        ...wordInput(),
+        translation: "算法",
+        partOfSpeech: "noun",
+        definition: "A procedure for solving a problem.",
+        knowledgeId: "term-algorithm",
+        sourceUrl: "https://doi.org/10.1234/example",
+      },
+      store,
+    );
+    expect(response).toMatchObject({
+      word: {
+        translation: "算法",
+        partOfSpeech: "noun",
+        definition: "A procedure for solving a problem.",
+        knowledgeId: "term-algorithm",
+        sourceUrl: "https://doi.org/10.1234/example",
+      },
+    });
+  });
+
+  it("lists personal dictionary entries", async () => {
+    const store = makeStore();
+    await store.addDictionaryEntry({
+      word: "algorithm",
+      from: "en",
+      to: "zh-CN",
+      translation: "算法",
+    });
+    const response = await routeLearningRequest(
+      { type: "learningListDictionaryEntries" },
+      store,
+    );
+    expect(response).toMatchObject({ entries: [{ word: "algorithm" }] });
   });
 });

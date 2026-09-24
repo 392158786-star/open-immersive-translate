@@ -392,12 +392,22 @@ export class LearningStore {
       domain: input.domain,
       from: input.from,
       to: input.to,
+      translation: input.translation,
+      partOfSpeech: input.partOfSpeech,
+      definition: input.definition,
+      knowledgeId: input.knowledgeId,
+      sourceUrl: input.sourceUrl,
     };
     const existing = await this.getRecord<SavedWord>("words", id);
     if (existing) {
       const word: SavedWord = {
         ...existing,
         ...fields,
+        translation: input.translation ?? existing.translation,
+        partOfSpeech: input.partOfSpeech ?? existing.partOfSpeech,
+        definition: input.definition ?? existing.definition,
+        knowledgeId: input.knowledgeId ?? existing.knowledgeId,
+        sourceUrl: input.sourceUrl ?? existing.sourceUrl,
         updatedAt: now,
         syncStatus: this.nextSyncStatus(existing.syncStatus),
       };
@@ -470,7 +480,7 @@ export class LearningStore {
       const entry: PersonalDictionaryEntry = {
         ...existing,
         word: input.word,
-        translation: input.translation,
+        translation: input.translation ?? existing.translation,
         updatedAt: now,
         syncStatus: this.nextSyncStatus(existing.syncStatus),
       };
@@ -508,6 +518,12 @@ export class LearningStore {
     return existing ?? null;
   }
 
+  async listDictionaryEntries(): Promise<PersonalDictionaryEntry[]> {
+    const entries =
+      await this.getAllRecords<PersonalDictionaryEntry>("dictionary");
+    return [...entries].sort((a, b) => b.updatedAt - a.updatedAt);
+  }
+
   async getLearningRevision(): Promise<number> {
     const record = await this.getRecord<MetaRecord>("meta", REVISION_KEY);
     return record?.value ?? 0;
@@ -527,6 +543,7 @@ const LEARNING_REQUEST_TYPES = new Set<string>([
   "learningFindWordsByArticle",
   "learningAddDictionaryEntry",
   "learningGetDictionaryEntry",
+  "learningListDictionaryEntries",
   "learningGetRevision",
 ]);
 
@@ -566,6 +583,11 @@ export async function routeLearningRequest(
         paragraphTheme: request.paragraphTheme,
         from: request.from,
         to: request.to,
+        translation: request.translation,
+        partOfSpeech: request.partOfSpeech,
+        definition: request.definition,
+        knowledgeId: request.knowledgeId,
+        sourceUrl: request.sourceUrl,
       });
       return { word };
     }
@@ -613,6 +635,10 @@ export async function routeLearningRequest(
         request.to,
       );
       return { entry };
+    }
+    case "learningListDictionaryEntries": {
+      const entries = await store.listDictionaryEntries();
+      return { entries };
     }
     case "learningGetRevision": {
       const revision = await store.getLearningRevision();

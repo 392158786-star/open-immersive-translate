@@ -32,6 +32,11 @@ import {
   getTranslationCacheCount,
 } from "./cache";
 import {
+  isLearningRequest,
+  learningStore,
+  routeLearningRequest,
+} from "./learning-store";
+import {
   isPageTranslationStateMessage,
   PageBadgeController,
   type BadgeActionApi,
@@ -230,6 +235,32 @@ function runTranslation(request: TranslateMessage): void {
   });
 }
 
+const LEARNING_WRITE_TYPES = new Set([
+  "learningSaveArticle",
+  "learningRemoveArticle",
+  "learningSaveWord",
+  "learningRemoveWord",
+  "learningAddDictionaryEntry",
+]);
+
+function isLearningWrite(request: { type: string }): boolean {
+  return LEARNING_WRITE_TYPES.has(request.type);
+}
+
+async function broadcastLearningChanged(): Promise<void> {
+  const revision = await learningStore.getLearningRevision();
+  const message = { type: "learningChanged" as const, revision };
+  const tabs = await browser.tabs.query({});
+  await Promise.all([
+    browser.runtime.sendMessage(message).catch(() => undefined),
+    ...tabs.map((tab) =>
+      tab.id === undefined
+        ? Promise.resolve()
+        : sendToTab(tab.id, message).catch(() => undefined),
+    ),
+  ]);
+}
+
 browser.runtime.onMessage.addListener(
   (message: unknown, sender: browser.Runtime.MessageSender) => {
     if (isPageTranslationStateMessage(message)) {
@@ -241,6 +272,13 @@ browser.runtime.onMessage.addListener(
       !("type" in message)
     ) {
       return undefined;
+    }
+
+    if (isLearningRequest(message)) {
+      return routeLearningRequest(message).then(async (result) => {
+        if (isLearningWrite(message)) await broadcastLearningChanged();
+        return result;
+      });
     }
 
     const request = message as BackgroundRequest;

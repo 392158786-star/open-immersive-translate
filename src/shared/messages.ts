@@ -3,6 +3,12 @@ import browser from "webextension-polyfill";
 import type { PageCommandId } from "./j-types";
 import type { AssistantRequest } from "./k-assistant";
 import type {
+  PersonalDictionaryEntry,
+  SavedArticle,
+  SavedWord,
+  WebsiteRecord,
+} from "./learning-types";
+import type {
   AcademicTermKnowledge,
   Config,
   ConfigPatch,
@@ -363,6 +369,8 @@ export type Msg =
   | AcademicOpenMessage
   | GetLocalModelStatusMessage
   | LoadLocalModelMessage
+  | LearningRequest
+  | LearningChangedMessage
   | TranslatePortMessage
   | CancelPortMessage;
 
@@ -392,7 +400,160 @@ export type BackgroundRequest =
   | AcademicGetMessage
   | AcademicOpenMessage
   | GetLocalModelStatusMessage
-  | LoadLocalModelMessage;
+  | LoadLocalModelMessage
+  | LearningRequest;
+
+/** Save an article or mark an existing context record as collected. */
+export interface LearningSaveArticleMessage {
+  type: "learningSaveArticle";
+  url: string;
+  title: string;
+}
+
+/** Stop collecting an article while keeping its context record and words. */
+export interface LearningRemoveArticleMessage {
+  type: "learningRemoveArticle";
+  articleId: string;
+}
+
+/** Save a word, creating or reusing its article context record. */
+export interface LearningSaveWordMessage {
+  type: "learningSaveWord";
+  url: string;
+  title: string;
+  domain: string;
+  word: string;
+  sentence: string;
+  previousSentence: string;
+  nextSentence: string;
+  paragraphTheme: string;
+  from?: LangCode;
+  to?: LangCode;
+}
+
+/** Remove a collected word. */
+export interface LearningRemoveWordMessage {
+  type: "learningRemoveWord";
+  wordId: string;
+}
+
+export interface LearningListArticlesMessage {
+  type: "learningListArticles";
+  savedOnly?: boolean;
+  limit?: number;
+  offset?: number;
+}
+
+export interface LearningListWordsMessage {
+  type: "learningListWords";
+  articleId?: string;
+  limit?: number;
+  offset?: number;
+}
+
+export interface LearningListWebsitesMessage {
+  type: "learningListWebsites";
+}
+
+export interface LearningFindWordsByArticleMessage {
+  type: "learningFindWordsByArticle";
+  articleId: string;
+}
+
+export interface LearningAddDictionaryEntryMessage {
+  type: "learningAddDictionaryEntry";
+  word: string;
+  from: LangCode;
+  to: LangCode;
+  translation?: string;
+}
+
+export interface LearningGetDictionaryEntryMessage {
+  type: "learningGetDictionaryEntry";
+  word: string;
+  from: LangCode;
+  to: LangCode;
+}
+
+export interface LearningGetRevisionMessage {
+  type: "learningGetRevision";
+}
+
+/** Broadcast to extension contexts after a learning write. */
+export interface LearningChangedMessage {
+  type: "learningChanged";
+  revision: number;
+}
+
+export type LearningRequest =
+  | LearningSaveArticleMessage
+  | LearningRemoveArticleMessage
+  | LearningSaveWordMessage
+  | LearningRemoveWordMessage
+  | LearningListArticlesMessage
+  | LearningListWordsMessage
+  | LearningListWebsitesMessage
+  | LearningFindWordsByArticleMessage
+  | LearningAddDictionaryEntryMessage
+  | LearningGetDictionaryEntryMessage
+  | LearningGetRevisionMessage;
+
+export interface LearningSaveArticleResult {
+  article: SavedArticle;
+}
+
+export interface LearningRemoveArticleResult {
+  article: SavedArticle | null;
+}
+
+export interface LearningSaveWordResult {
+  word: SavedWord;
+}
+
+export interface LearningRemoveWordResult {
+  removed: boolean;
+}
+
+export interface LearningListArticlesResult {
+  articles: SavedArticle[];
+}
+
+export interface LearningListWordsResult {
+  words: SavedWord[];
+}
+
+export interface LearningListWebsitesResult {
+  websites: WebsiteRecord[];
+}
+
+export interface LearningFindWordsByArticleResult {
+  words: SavedWord[];
+}
+
+export interface LearningAddDictionaryEntryResult {
+  entry: PersonalDictionaryEntry;
+}
+
+export interface LearningGetDictionaryEntryResult {
+  entry: PersonalDictionaryEntry | null;
+}
+
+export interface LearningGetRevisionResult {
+  revision: number;
+}
+
+export type LearningResponse =
+  | LearningSaveArticleResult
+  | LearningRemoveArticleResult
+  | LearningSaveWordResult
+  | LearningRemoveWordResult
+  | LearningListArticlesResult
+  | LearningListWordsResult
+  | LearningListWebsitesResult
+  | LearningFindWordsByArticleResult
+  | LearningAddDictionaryEntryResult
+  | LearningGetDictionaryEntryResult
+  | LearningGetRevisionResult;
 
 /** Acknowledgement for work submitted to a scheduler. */
 export interface TranslateAcknowledgement {
@@ -452,9 +613,31 @@ export type BackgroundResponse<T extends BackgroundRequest> =
                               ? AssistantCapabilities
                               : T extends OpenSidePanelMessage
                                 ? OpenSidePanelResult
-                                : T extends PageTranslationStateMessage
-                                  ? PageTranslationStateAcknowledgement
-                                  : never;
+                                : T extends LearningSaveArticleMessage
+                                  ? LearningSaveArticleResult
+                                  : T extends LearningRemoveArticleMessage
+                                    ? LearningRemoveArticleResult
+                                    : T extends LearningSaveWordMessage
+                                      ? LearningSaveWordResult
+                                      : T extends LearningRemoveWordMessage
+                                        ? LearningRemoveWordResult
+                                        : T extends LearningListArticlesMessage
+                                          ? LearningListArticlesResult
+                                          : T extends LearningListWordsMessage
+                                            ? LearningListWordsResult
+                                            : T extends LearningListWebsitesMessage
+                                              ? LearningListWebsitesResult
+                                              : T extends LearningFindWordsByArticleMessage
+                                                ? LearningFindWordsByArticleResult
+                                                : T extends LearningAddDictionaryEntryMessage
+                                                  ? LearningAddDictionaryEntryResult
+                                                  : T extends LearningGetDictionaryEntryMessage
+                                                    ? LearningGetDictionaryEntryResult
+                                                    : T extends LearningGetRevisionMessage
+                                                      ? LearningGetRevisionResult
+                                                      : T extends PageTranslationStateMessage
+                                                        ? PageTranslationStateAcknowledgement
+                                                        : never;
 
 /** Messages sent directly to a tab's content script. */
 export type TabMessage =
@@ -467,7 +650,8 @@ export type TabMessage =
   | GetPageStateMessage
   | GetSelectionTextMessage
   | ToggleVideoSubtitlePreTranslationMessage
-  | ControllerCommandMessage;
+  | ControllerCommandMessage
+  | LearningChangedMessage;
 
 /** Send a request to the background worker with an inferred response type. */
 export async function sendToBackground<T extends BackgroundRequest>(

@@ -718,14 +718,24 @@ export class TranslationController implements PageControllerActions {
       (request) => this.resolveHoverKnowledge(request),
       {
         onBookmarkWord: (request) => {
-          document.dispatchEvent(
-            new CustomEvent("imt:bookmark-word", { detail: request }),
-          );
+          void sendToBackground({
+            type: "learningSaveWord",
+            url: window.location.href,
+            title: request.title,
+            domain: request.domain,
+            word: request.word,
+            sentence: request.sentence,
+            previousSentence: request.previousSentence,
+            nextSentence: request.nextSentence,
+            paragraphTheme: request.paragraphTheme,
+          }).catch(() => undefined);
         },
         onBookmarkArticle: (request) => {
-          document.dispatchEvent(
-            new CustomEvent("imt:bookmark-article", { detail: request }),
-          );
+          void sendToBackground({
+            type: "learningSaveArticle",
+            url: window.location.href,
+            title: request.title,
+          }).catch(() => undefined);
         },
         onOpenSource: (knowledge) => {
           const source = knowledge.sources[0]?.url;

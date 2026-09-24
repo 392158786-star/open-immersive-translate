@@ -41,6 +41,8 @@ function context(): FeatureContext {
   return {
     config: {
       floatBall: { enabled: true, position: "right" },
+      readingMode: "professional",
+      translationMode: "dual",
       neverTranslateSites: [],
     } as unknown as FeatureContext["config"],
     rule: { matches: ["<all_urls>"] },
@@ -178,6 +180,39 @@ describe("float ball", () => {
 
     expect(host.style.left).toBe("556px");
     expect(host.style.top).toBe("182px");
+    dispose();
+  });
+
+  it("only exposes the three reading modes and settings", async () => {
+    const dispose = init(context());
+    const host = document.querySelector<HTMLElement>(
+      '[data-imt="float-ball"]',
+    )!;
+    const menu = host.shadowRoot!.querySelector<HTMLElement>(".menu")!;
+    const actions = [
+      ...menu.querySelectorAll<HTMLButtonElement>("button"),
+    ].map((button) => button.dataset.action);
+
+    expect(actions).toEqual([
+      "quick",
+      "professional",
+      "research",
+      "settings",
+    ]);
+
+    menu
+      .querySelector<HTMLButtonElement>('[data-action="quick"]')!
+      .click();
+    await Promise.resolve();
+    expect(browserMock.runtime.sendMessage).toHaveBeenCalledWith({
+      type: "setConfig",
+      patch: {
+        translateMainOnly: false,
+        readingMode: "quick",
+        translationMode: "translation",
+        hoverTranslateDirectly: false,
+      },
+    });
     dispose();
   });
 });

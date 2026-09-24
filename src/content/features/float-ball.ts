@@ -170,13 +170,10 @@ export function init(ctx: FeatureContext): () => void {
     </style>
     <button class="ball" type="button" title="Toggle translation" aria-label="Toggle translation"></button>
     <div class="menu" role="menu" hidden>
-      <button type="button" role="menuitem" data-action="settings">设置</button>
-      <button type="button" role="menuitem" data-action="original">原网页</button>
       <button type="button" role="menuitem" data-action="quick">快速模式</button>
       <button type="button" role="menuitem" data-action="professional">专业模式</button>
       <button type="button" role="menuitem" data-action="research">研究模式</button>
-      <button type="button" role="menuitem" data-action="academic">学术助手</button>
-      <button type="button" role="menuitem" data-action="never-site">从不翻译此站</button>
+      <button type="button" role="menuitem" data-action="settings">设置</button>
     </div>
   `;
 
@@ -297,10 +294,7 @@ export function init(ctx: FeatureContext): () => void {
     for (const item of menu.querySelectorAll<HTMLButtonElement>("button")) {
       const action = item.dataset.action;
       item.dataset.active = String(
-        (!ctx.isTranslated() && action === "original") ||
-          (ctx.isTranslated() && action === ctx.config.readingMode) ||
-          (action === "academic" &&
-            ctx.config.academic?.enabled === true),
+        ctx.isTranslated() && action === ctx.config.readingMode,
       );
     }
   };
@@ -371,12 +365,6 @@ export function init(ctx: FeatureContext): () => void {
       return;
     }
 
-    if (action === "original") {
-      if (ctx.isTranslated()) ctx.toggleTranslate();
-      button.setAttribute("aria-pressed", "false");
-      return;
-    }
-
     if (
       action === "quick" ||
       action === "professional" ||
@@ -395,34 +383,6 @@ export function init(ctx: FeatureContext): () => void {
       if (!ctx.isTranslated()) ctx.toggleTranslate("whole");
       button.setAttribute("aria-pressed", "true");
       return;
-    }
-
-    if (action === "academic") {
-      const academic = ctx.config.academic;
-      if (!academic) return;
-      void sendToBackground({
-        type: "setConfig",
-        patch: {
-          academic: {
-            ...academic,
-            enabled: !academic.enabled,
-          },
-        },
-      }).catch(() => undefined);
-      return;
-    }
-
-    if (action === "never-site") {
-      const hostname = window.location.hostname;
-      const neverTranslateSites = Array.from(
-        new Set([...ctx.config.neverTranslateSites, hostname]),
-      );
-      void sendToBackground({
-        type: "setConfig",
-        patch: { neverTranslateSites },
-      }).catch(() => undefined);
-      if (ctx.isTranslated()) ctx.toggleTranslate();
-      button.setAttribute("aria-pressed", "false");
     }
   };
 

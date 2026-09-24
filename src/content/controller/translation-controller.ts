@@ -15,8 +15,8 @@ import {
 import { normalizeLang } from "../../shared/lang";
 import { lookupLocalUiPhrase } from "../../shared/local-ui-phrases";
 import {
-  canonicalArticleId,
   normalizedWordKey,
+  websiteIdFromUrl,
 } from "../../shared/learning-identity";
 import type {
   AcademicTermKnowledge,
@@ -727,7 +727,7 @@ export class TranslationController implements PageControllerActions {
       (request) => this.resolveHoverKnowledge(request),
       {
         getBookmarkState: (request) =>
-          this.currentWordBookmarkState(request.word, request.title),
+          this.currentWordBookmarkState(request.word),
         onBookmarkWord: (request, knowledge) =>
           this.toggleBookmarkWord(request, knowledge),
         onOpenSource: (knowledge) => {
@@ -747,13 +747,12 @@ export class TranslationController implements PageControllerActions {
 
   private async currentWordBookmarkState(
     word: string,
-    title: string,
   ): Promise<"collected" | "uncollected"> {
-    const articleId = await canonicalArticleId(window.location.href, title);
+    const websiteId = await websiteIdFromUrl(window.location.href);
     const key = await normalizedWordKey(word);
     const response = await sendToBackground({
       type: "learningListWords",
-      articleId,
+      websiteId,
     });
     return response.words.some((saved) => saved.normalizedKey === key)
       ? "collected"
@@ -764,14 +763,11 @@ export class TranslationController implements PageControllerActions {
     request: HoverContextRequest,
     knowledge: AcademicTermKnowledge,
   ): Promise<"collected" | "uncollected"> {
-    const articleId = await canonicalArticleId(
-      window.location.href,
-      request.title,
-    );
+    const websiteId = await websiteIdFromUrl(window.location.href);
     const key = await normalizedWordKey(request.word);
     const response = await sendToBackground({
       type: "learningListWords",
-      articleId,
+      websiteId,
     });
     const matches = response.words.filter(
       (saved) => saved.normalizedKey === key,

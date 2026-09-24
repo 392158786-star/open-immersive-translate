@@ -452,6 +452,8 @@ export interface LearningListArticlesMessage {
 export interface LearningListWordsMessage {
   type: "learningListWords";
   articleId?: string;
+  websiteId?: string;
+  hostname?: string;
   limit?: number;
   offset?: number;
 }

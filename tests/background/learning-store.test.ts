@@ -264,6 +264,75 @@ describe("LearningStore", () => {
     expect(second.partOfSpeech).toBe("noun");
     expect(second.definition).toBe("A procedure for solving a problem.");
   });
+
+  it("stores websiteId and hostname on saved words", async () => {
+    const store = makeStore();
+    const saved = await store.saveWord(wordInput());
+    expect(saved.websiteId).toBe(
+      await websiteIdFromUrl("https://example.com/article"),
+    );
+    expect(saved.hostname).toBe("example.com");
+  });
+
+  it("isolates words by website hostname", async () => {
+    const store = makeStore();
+    await store.saveWord(wordInput({ url: "https://example.com/a", title: "A" }));
+    await store.saveWord(
+      wordInput({ url: "https://other.org/b", title: "B" }),
+    );
+    const exampleId = await websiteIdFromUrl("https://example.com/a");
+    const otherId = await websiteIdFromUrl("https://other.org/b");
+    const exampleWords = await store.listWordsByWebsite(exampleId);
+    const otherWords = await store.listWordsByWebsite(otherId);
+    expect(exampleWords).toHaveLength(1);
+    expect(otherWords).toHaveLength(1);
+    expect(exampleWords[0].websiteId).toBe(exampleId);
+    expect(otherWords[0].websiteId).toBe(otherId);
+    expect(await store.listWords({ hostname: "example.com" })).toHaveLength(1);
+    expect(await store.listWords({ hostname: "other.org" })).toHaveLength(1);
+  });
+
+  it("shares one website collection across two articles on the same hostname", async () => {
+    const store = makeStore();
+    await store.saveWord(wordInput({ url: "https://example.com/a", title: "A" }));
+    await store.saveWord(
+      wordInput({ url: "https://example.com/b", title: "B", word: "vector" }),
+    );
+    const websiteId = await websiteIdFromUrl("https://example.com/a");
+    const words = await store.listWordsByWebsite(websiteId);
+    expect(words).toHaveLength(2);
+  });
+
+  it("resolves legacy words without websiteId through their article", async () => {
+    const store = makeStore();
+    const article = await store.saveArticle({
+      url: "https://example.com/a",
+      title: "A",
+    });
+    const memory = (
+      store as unknown as {
+        memory: { words: Map<string, unknown> };
+      }
+    ).memory;
+    memory.words.set("legacy", {
+      id: "legacy",
+      articleId: article.id,
+      word: "algorithm",
+      normalizedKey: "algorithm",
+      contextHash: "ctx",
+      sentence: "An algorithm is a set of steps.",
+      previousSentence: "",
+      nextSentence: "",
+      paragraphTheme: "Introduction",
+      domain: "Computer science",
+      createdAt: 1,
+      updatedAt: 2,
+      syncStatus: "local",
+    });
+    const words = await store.listWordsByWebsite(article.websiteId);
+    expect(words.map((word) => word.id)).toContain("legacy");
+    expect(await store.listWords({ hostname: "example.com" })).toHaveLength(1);
+  });
 });
 
 describe("routeLearningRequest", () => {

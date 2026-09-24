@@ -1,10 +1,7 @@
 import browser from "webextension-polyfill";
 
 import type { SavedWord } from "../../shared/learning-types";
-import {
-  canonicalArticleId,
-  normalizeWord,
-} from "../../shared/learning-identity";
+import { normalizeWord } from "../../shared/learning-identity";
 import { sendToBackground } from "../../shared/messages";
 import { onUrlChange } from "../observe/url-change";
 
@@ -12,8 +9,8 @@ const MIN_SUPPORTED_WIDTH = 900;
 
 /** Data and IO surface the drawer depends on. */
 export interface WordCollectionAdapter {
-  currentArticleId(): Promise<string>;
-  listWords(articleId: string): Promise<SavedWord[]>;
+  currentHostname(): Promise<string>;
+  listWords(hostname: string): Promise<SavedWord[]>;
   removeWords(wordIds: string[]): Promise<void>;
   onChanged(listener: () => void): () => void;
   onUrlChange(listener: (url: string) => void): () => void;
@@ -148,19 +145,19 @@ const TEMPLATE = `
     .knowledge-source { color: #175cd3; font-size: 12px; }
     @media print { :host { display: none !important; } }
   </style>
-  <button class="handle" type="button" data-action="toggle" aria-label="本页收藏">
+  <button class="handle" type="button" data-action="toggle" aria-label="本站收藏">
     <span class="handle-chevrons">&gt;&gt;</span>
     <span class="handle-count">0</span>
   </button>
   <aside class="drawer" hidden>
     <header class="drawer-head">
-      <h2 class="drawer-title">本页收藏</h2>
+      <h2 class="drawer-title">本站收藏</h2>
       <span class="drawer-total">0</span>
       <button class="drawer-close" type="button" data-action="close" aria-label="关闭">×</button>
     </header>
     <div class="drawer-body">
       <div class="drawer-list"></div>
-      <p class="drawer-empty">本页还没有收藏的词语</p>
+      <p class="drawer-empty">本站还没有收藏的词语</p>
       <div class="drawer-knowledge" hidden></div>
     </div>
   </aside>
@@ -174,6 +171,8 @@ export class WordCollectionDrawer {
   private expanded = false;
   private knowledgeKey?: string;
   private disposed = false;
+  private lastHostname?: string;
+  private refreshSequence = 0;
   private repositionTimer?: ReturnType<typeof setTimeout>;
   private readonly disposers: Array<() => void> = [];
 
@@ -374,12 +373,21 @@ export class WordCollectionDrawer {
 
   async refresh(): Promise<void> {
     if (!this.shadow) return;
+    const refreshSequence = ++this.refreshSequence;
     let groups: WordGroup[];
     try {
-      const articleId = await this.adapter.currentArticleId();
-      const words = await this.adapter.listWords(articleId);
+      const hostname = await this.adapter.currentHostname();
+      if (refreshSequence !== this.refreshSequence) return;
+      if (hostname !== this.lastHostname) {
+        this.lastHostname = hostname;
+        this.groups = [];
+        this.renderList();
+      }
+      const words = await this.adapter.listWords(hostname);
+      if (refreshSequence !== this.refreshSequence) return;
       groups = groupWords(words);
     } catch {
+      if (refreshSequence !== this.refreshSequence) return;
       groups = [];
     }
     if (!this.shadow) return;
@@ -481,12 +489,11 @@ function groupWords(words: SavedWord[]): WordGroup[] {
 /** Mount the current-page word collection drawer with real dependencies. */
 export function initWordCollection(): () => void {
   const drawer = new WordCollectionDrawer({
-    currentArticleId: () =>
-      canonicalArticleId(window.location.href, document.title),
-    listWords: async (articleId) => {
+    currentHostname: async () => window.location.hostname,
+    listWords: async (hostname) => {
       const response = await sendToBackground({
         type: "learningListWords",
-        articleId,
+        hostname,
       });
       return response.words;
     },

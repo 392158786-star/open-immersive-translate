@@ -350,6 +350,8 @@ export class LearningStore {
     await this.ensureArticleContext(articleId, input.url, input.title, websiteId, now);
     const fields = {
       articleId,
+      websiteId,
+      hostname,
       word: input.word,
       normalizedKey,
       contextHash: ctxHash,
@@ -417,10 +419,37 @@ export class LearningStore {
     if (query.articleId) {
       words = words.filter((word) => word.articleId === query.articleId);
     }
+    if (query.websiteId) {
+      const articles = await this.getAllRecords<SavedArticle>("articles");
+      const articleWebsite = new Map(
+        articles.map((article) => [article.id, article.websiteId]),
+      );
+      words = words.filter(
+        (word) =>
+          (word.websiteId ?? articleWebsite.get(word.articleId)) ===
+          query.websiteId,
+      );
+    }
+    if (query.hostname) {
+      const articles = await this.getAllRecords<SavedArticle>("articles");
+      const articleHostname = new Map(
+        articles.map((article) => [article.id, hostnameFromUrl(article.url)]),
+      );
+      words = words.filter(
+        (word) =>
+          (word.hostname ?? articleHostname.get(word.articleId)) ===
+          query.hostname,
+      );
+    }
     words = [...words].sort((a, b) => b.updatedAt - a.updatedAt);
     const offset = query.offset ?? 0;
     const limit = query.limit ?? words.length;
     return words.slice(offset, offset + limit);
+  }
+
+  /** List collected words for a website, resolving legacy records by article. */
+  async listWordsByWebsite(websiteId: string): Promise<SavedWord[]> {
+    return this.listWords({ websiteId });
   }
 
   async listWebsites(): Promise<WebsiteRecord[]> {
@@ -574,6 +603,8 @@ export async function routeLearningRequest(
     case "learningListWords": {
       const words = await store.listWords({
         articleId: request.articleId,
+        websiteId: request.websiteId,
+        hostname: request.hostname,
         limit: request.limit,
         offset: request.offset,
       });

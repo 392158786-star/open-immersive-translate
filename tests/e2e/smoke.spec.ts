@@ -503,13 +503,35 @@ test("translates newly visible paragraphs after scrolling a long page", async ({
   }
 });
 
-test("shows the current-page word collection drawer", async ({
+test("shows the site-scoped word collection drawer and isolates by hostname", async ({
   playwright,
 }) => {
   const { context, worker, extensionId } = await launchExtension(playwright);
   try {
     await selectMockService(worker);
-    const articleUrl = `${origin}/article.html`;
+    const fixture = await readFile(
+      path.resolve("tests/e2e/fixtures/article.html"),
+      "utf8",
+    );
+    const hostA = "http://site-a.example";
+    const hostB = "http://site-b.example";
+    const fulfillFixture = async (route: {
+      fulfill(options: {
+        status: number;
+        contentType: string;
+        body: string;
+      }): Promise<void>;
+    }): Promise<void> => {
+      await route.fulfill({
+        status: 200,
+        contentType: "text/html; charset=utf-8",
+        body: fixture,
+      });
+    };
+    await context.route(`${hostA}/**`, fulfillFixture);
+    await context.route(`${hostB}/**`, fulfillFixture);
+
+    const articleUrl = `${hostA}/article.html`;
     const helper = await context.newPage();
     await helper.goto(
       `chrome-extension://${extensionId}/src/ui/sidepanel/index.html`,
@@ -566,6 +588,13 @@ test("shows the current-page word collection drawer", async ({
     await expect(collection.locator(".drawer-knowledge")).toContainText(
       "noun",
     );
+
+    const otherPage = await context.newPage();
+    await otherPage.setViewportSize({ width: 1280, height: 800 });
+    await otherPage.goto(`${hostB}/article.html`);
+    const otherCollection = otherPage.locator('[data-imt="word-collection"]');
+    await expect(otherCollection.locator(".handle")).toBeVisible();
+    await expect(otherCollection.locator(".handle-count")).toHaveText("0");
   } finally {
     await context.close();
   }

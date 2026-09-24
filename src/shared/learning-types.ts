@@ -35,6 +35,8 @@ export interface SavedArticle extends LearningRecordBase {
 /** A collected word tied to one article context record. */
 export interface SavedWord extends LearningRecordBase {
   articleId: string;
+  websiteId: string;
+  hostname: string;
   word: string;
   normalizedKey: string;
   contextHash: string;
@@ -115,6 +117,8 @@ export interface ListArticlesQuery {
 /** Options for listing words. */
 export interface ListWordsQuery {
   articleId?: string;
+  websiteId?: string;
+  hostname?: string;
   limit?: number;
   offset?: number;
 }

@@ -149,6 +149,35 @@ describe("TranslationController", () => {
     controller.destroy();
   });
 
+  it("does not show the hover card in quick mode", async () => {
+    vi.useFakeTimers();
+    document.body.innerHTML =
+      '<p><font data-imt="source">Hover source word.</font></p>';
+    const source = document.querySelector<HTMLElement>(
+      'font[data-imt="source"]',
+    )!;
+    Object.defineProperty(document, "caretPositionFromPoint", {
+      configurable: true,
+      value: vi.fn(() => ({ offsetNode: source.firstChild, offset: 2 })),
+    });
+    Object.defineProperty(document, "elementFromPoint", {
+      configurable: true,
+      value: vi.fn(() => source),
+    });
+    const controller = new TranslationController(
+      Object.assign(config(), { readingMode: "quick" }) as AdvancedPageConfig,
+      generalRule,
+    );
+
+    source.dispatchEvent(
+      new MouseEvent("mousemove", { bubbles: true, clientX: 20, clientY: 30 }),
+    );
+    await vi.advanceTimersByTimeAsync(600);
+
+    expect(document.querySelector('[data-imt="context-card"]')).toBeNull();
+    controller.destroy();
+  });
+
   it("translates only main prose and sends domain glossary plus page context", async () => {
     vi.useFakeTimers();
     document.title = "Test article";

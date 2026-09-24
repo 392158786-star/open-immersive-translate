@@ -2,6 +2,8 @@ import type { AcademicTermKnowledge } from "../../shared/types";
 
 const HOVER_DELAY_MS = 500;
 const CARD_MARGIN = 10;
+const WORD_TO_CARD_GRACE_MS = 350;
+const CARD_TO_PAGE_GRACE_MS = 180;
 
 export interface HoverContextRequest {
   word: string;
@@ -330,11 +332,30 @@ export function installDirectHoverTranslation(
   let point: { x: number; y: number; key: string } | undefined;
   let host: HTMLElement | undefined;
   let sequence = 0;
+  let closeTimer: ReturnType<typeof setTimeout> | undefined;
+  let pointerInCard = false;
+  let activeWordKey: string | undefined;
+
+  const cancelCloseTimer = (): void => {
+    if (closeTimer !== undefined) clearTimeout(closeTimer);
+    closeTimer = undefined;
+  };
 
   const closeCard = (): void => {
     sequence += 1;
+    cancelCloseTimer();
+    pointerInCard = false;
+    activeWordKey = undefined;
     host?.remove();
     host = undefined;
+  };
+
+  const scheduleClose = (graceMs: number): void => {
+    cancelCloseTimer();
+    closeTimer = setTimeout(() => {
+      closeTimer = undefined;
+      closeCard();
+    }, graceMs);
   };
 
   const clearTimer = (): void => {
@@ -406,24 +427,43 @@ export function installDirectHoverTranslation(
   };
 
   const onMouseMove = (event: MouseEvent): void => {
-    if (event.composedPath().some((target) => target === host)) return;
+    if (host && event.composedPath().some((target) => target === host)) {
+      pointerInCard = true;
+      cancelCloseTimer();
+      return;
+    }
+    const leavingCard = pointerInCard;
+    if (leavingCard) pointerInCard = false;
+
     const target =
       document.elementFromPoint?.(event.clientX, event.clientY) ??
       (event.target instanceof Element ? event.target : null);
     if (!(target instanceof Element) || isExcluded(target)) {
       clearTimer();
-      closeCard();
+      if (host) {
+        scheduleClose(
+          leavingCard ? CARD_TO_PAGE_GRACE_MS : WORD_TO_CARD_GRACE_MS,
+        );
+      }
       return;
     }
     const found = findWordAtPoint(document, event.clientX, event.clientY);
     if (!found) {
       clearTimer();
-      closeCard();
+      if (host) {
+        scheduleClose(
+          leavingCard ? CARD_TO_PAGE_GRACE_MS : WORD_TO_CARD_GRACE_MS,
+        );
+      }
       return;
     }
     const key = `${found.word}:${event.clientX}:${event.clientY}`;
     if (point?.key === key) return;
     clearTimer();
+    if (host && activeWordKey === found.word) {
+      cancelCloseTimer();
+      return;
+    }
     closeCard();
     point = { x: event.clientX, y: event.clientY, key };
     const localPoint = point;
@@ -439,6 +479,8 @@ export function installDirectHoverTranslation(
         localPoint.y,
       );
       const requestSequence = ++sequence;
+      activeWordKey = found.word;
+      pointerInCard = false;
       showCard(
         request,
         {

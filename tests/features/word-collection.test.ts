@@ -22,6 +22,8 @@ function savedWord(overrides: Partial<SavedWord> = {}): SavedWord {
   return {
     id: "w1",
     articleId: "a1",
+    websiteId: "site-a",
+    hostname: "site-a.example",
     word: "algorithm",
     normalizedKey: "algorithm",
     contextHash: "ctx",
@@ -42,7 +44,7 @@ function savedWord(overrides: Partial<SavedWord> = {}): SavedWord {
 
 interface Harness {
   adapter: WordCollectionAdapter;
-  setArticleId(id: string): void;
+  setHostname(hostname: string): void;
   setWords(words: SavedWord[]): void;
   listWords: ReturnType<typeof vi.fn>;
   removeWords: ReturnType<typeof vi.fn>;
@@ -51,18 +53,18 @@ interface Harness {
 }
 
 function harness(overrides: Partial<WordCollectionAdapter> = {}): Harness {
-  let articleId = "a1";
+  let hostname = "site-a.example";
   let words: SavedWord[] = [];
   const changedListeners: Array<() => void> = [];
   const urlListeners: Array<(url: string) => void> = [];
   const listWords = vi.fn(
-    async (id: string) => words.filter((word) => word.articleId === id),
+    async (id: string) => words.filter((word) => word.hostname === id),
   );
   const removeWords = vi.fn(async (ids: string[]) => {
     words = words.filter((word) => !ids.includes(word.id));
   });
   const adapter: WordCollectionAdapter = {
-    currentArticleId: vi.fn(async () => articleId),
+    currentHostname: vi.fn(async () => hostname),
     listWords,
     removeWords,
     onChanged: vi.fn((listener: () => void) => {
@@ -78,8 +80,8 @@ function harness(overrides: Partial<WordCollectionAdapter> = {}): Harness {
   };
   return {
     adapter,
-    setArticleId: (id: string) => {
-      articleId = id;
+    setHostname: (next: string) => {
+      hostname = next;
     },
     setWords: (next: SavedWord[]) => {
       words = next;
@@ -247,7 +249,32 @@ describe("word collection drawer", () => {
     drawer.dispose();
   });
 
-  it("renders only words that belong to the current article", async () => {
+  it("renders only words that belong to the current website", async () => {
+    const h = harness();
+    const drawer = new WordCollectionDrawer(h.adapter);
+    h.setWords([
+      savedWord(),
+      savedWord({
+        id: "w2",
+        articleId: "a2",
+        websiteId: "site-b",
+        hostname: "site-b.example",
+        word: "vector",
+        normalizedKey: "vector",
+        contextHash: "ctx2",
+      }),
+    ]);
+    drawer.mount();
+    await flush();
+
+    expect(h.listWords).toHaveBeenCalledWith("site-a.example");
+    expect(query(".handle-count")?.textContent).toBe("1");
+    expect(query(".drawer-list")?.textContent).toContain("algorithm");
+    expect(query(".drawer-list")?.textContent).not.toContain("vector");
+    drawer.dispose();
+  });
+
+  it("shares one website collection across articles on the same hostname", async () => {
     const h = harness();
     const drawer = new WordCollectionDrawer(h.adapter);
     h.setWords([
@@ -263,10 +290,10 @@ describe("word collection drawer", () => {
     drawer.mount();
     await flush();
 
-    expect(h.listWords).toHaveBeenCalledWith("a1");
-    expect(query(".handle-count")?.textContent).toBe("1");
+    expect(h.listWords).toHaveBeenCalledWith("site-a.example");
+    expect(query(".handle-count")?.textContent).toBe("2");
     expect(query(".drawer-list")?.textContent).toContain("algorithm");
-    expect(query(".drawer-list")?.textContent).not.toContain("vector");
+    expect(query(".drawer-list")?.textContent).toContain("vector");
     drawer.dispose();
   });
 
@@ -317,13 +344,100 @@ describe("word collection drawer", () => {
     expect(query(".handle-count")?.textContent).toBe("1");
 
     const callsBefore = h.listWords.mock.calls.length;
-    h.setArticleId("a2");
+    h.setHostname("site-b.example");
     h.setWords([]);
-    h.emitUrlChange("https://example.com/other");
+    h.emitUrlChange("https://other.org/other");
     await flush();
 
     expect(h.listWords.mock.calls.length).toBeGreaterThan(callsBefore);
     expect(query(".handle-count")?.textContent).toBe("0");
+    drawer.dispose();
+  });
+
+  it("clears stale words before loading a new website collection", async () => {
+    const h = harness();
+    const drawer = new WordCollectionDrawer(h.adapter);
+    h.setWords([savedWord()]);
+    drawer.mount();
+    await flush();
+    expect(query(".handle-count")?.textContent).toBe("1");
+
+    h.setHostname("site-b.example");
+    let resolveList: ((value: SavedWord[]) => void) | undefined;
+    h.listWords.mockImplementationOnce(
+      () =>
+        new Promise<SavedWord[]>((resolve) => {
+          resolveList = resolve;
+        }),
+    );
+    h.emitUrlChange("https://other.org/next");
+    await flush();
+
+    expect(query(".handle-count")?.textContent).toBe("0");
+    expect(query(".drawer-list")?.textContent).not.toContain("algorithm");
+
+    resolveList!([
+      savedWord({
+        id: "w2",
+        websiteId: "site-b",
+        hostname: "site-b.example",
+        word: "vector",
+        normalizedKey: "vector",
+        contextHash: "ctx2",
+      }),
+    ]);
+    await flush();
+
+    expect(query(".handle-count")?.textContent).toBe("1");
+    expect(query(".drawer-list")?.textContent).toContain("vector");
+    drawer.dispose();
+  });
+
+  it("ignores an older website refresh that finishes after a newer one", async () => {
+    const h = harness();
+    const drawer = new WordCollectionDrawer(h.adapter);
+    h.setWords([savedWord()]);
+    drawer.mount();
+    await flush();
+
+    h.setHostname("site-b.example");
+    let resolveSiteB: ((value: SavedWord[]) => void) | undefined;
+    h.listWords.mockImplementationOnce(
+      () =>
+        new Promise<SavedWord[]>((resolve) => {
+          resolveSiteB = resolve;
+        }),
+    );
+    h.emitUrlChange("https://site-b.example/article");
+    await flush();
+
+    h.setHostname("site-c.example");
+    h.setWords([
+      savedWord({
+        id: "site-c-word",
+        websiteId: "site-c",
+        hostname: "site-c.example",
+        word: "closure",
+        normalizedKey: "closure",
+      }),
+    ]);
+    h.emitUrlChange("https://site-c.example/article");
+    await flush();
+    expect(query(".drawer-list")?.textContent).toContain("closure");
+
+    resolveSiteB?.([
+      savedWord({
+        id: "site-b-word",
+        websiteId: "site-b",
+        hostname: "site-b.example",
+        word: "stale",
+        normalizedKey: "stale",
+      }),
+    ]);
+    await flush();
+
+    expect(query(".drawer-list")?.textContent).toContain("closure");
+    expect(query(".drawer-list")?.textContent).not.toContain("stale");
     drawer.dispose();
   });
 });

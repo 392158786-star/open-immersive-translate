@@ -31,6 +31,23 @@ function stubElementFromPoint(element: Element): void {
   });
 }
 
+function stubEmptyPoint(): void {
+  Object.defineProperty(document, "caretPositionFromPoint", {
+    configurable: true,
+    value: vi.fn(() => ({ offsetNode: document.body, offset: 0 })),
+  });
+}
+
+function contextCard(): HTMLElement | null {
+  return document.querySelector<HTMLElement>('[data-imt="context-card"]');
+}
+
+function cardElement(): HTMLElement | null {
+  return (
+    contextCard()?.shadowRoot?.querySelector<HTMLElement>(".card") ?? null
+  );
+}
+
 afterEach(() => {
   vi.useRealTimers();
   vi.restoreAllMocks();
@@ -273,6 +290,195 @@ describe("context hover translation", () => {
     await Promise.resolve();
     await Promise.resolve();
     expect(button?.dataset.state).toBe("collected");
+    dispose();
+  });
+
+  it("keeps the card open while the pointer crosses from the word to the card", async () => {
+    vi.useFakeTimers();
+    document.body.innerHTML =
+      '<p><font data-imt="source">Hover source word.</font></p>';
+    const source = document.querySelector<HTMLElement>(
+      'font[data-imt="source"]',
+    )!;
+    stubPoint(source.firstChild as Text);
+    stubElementFromPoint(source);
+    const dispose = installDirectHoverTranslation(
+      vi.fn(() => new Promise<never>(() => undefined)),
+      { delayMs: 500 },
+    );
+
+    source.dispatchEvent(
+      new MouseEvent("mousemove", {
+        bubbles: true,
+        clientX: 20,
+        clientY: 30,
+      }),
+    );
+    await vi.advanceTimersByTimeAsync(500);
+    expect(contextCard()).not.toBeNull();
+
+    stubEmptyPoint();
+    stubElementFromPoint(document.body);
+    document.body.dispatchEvent(
+      new MouseEvent("mousemove", { bubbles: true, clientX: 200, clientY: 300 }),
+    );
+    await vi.advanceTimersByTimeAsync(100);
+    expect(contextCard()).not.toBeNull();
+
+    cardElement()?.dispatchEvent(
+      new MouseEvent("mousemove", {
+        bubbles: true,
+        composed: true,
+        clientX: 200,
+        clientY: 300,
+      }),
+    );
+    await vi.advanceTimersByTimeAsync(400);
+    expect(contextCard()).not.toBeNull();
+    dispose();
+  });
+
+  it("keeps the card open while the pointer is inside it", async () => {
+    vi.useFakeTimers();
+    document.body.innerHTML =
+      '<p><font data-imt="source">Hover source word.</font></p>';
+    const source = document.querySelector<HTMLElement>(
+      'font[data-imt="source"]',
+    )!;
+    stubPoint(source.firstChild as Text);
+    stubElementFromPoint(source);
+    const dispose = installDirectHoverTranslation(
+      vi.fn(() => new Promise<never>(() => undefined)),
+      { delayMs: 500 },
+    );
+
+    source.dispatchEvent(
+      new MouseEvent("mousemove", {
+        bubbles: true,
+        clientX: 20,
+        clientY: 30,
+      }),
+    );
+    await vi.advanceTimersByTimeAsync(500);
+    expect(contextCard()).not.toBeNull();
+
+    const card = cardElement()!;
+    for (let index = 0; index < 3; index += 1) {
+      card.dispatchEvent(
+        new MouseEvent("mousemove", {
+          bubbles: true,
+          composed: true,
+          clientX: 200 + index,
+          clientY: 300,
+        }),
+      );
+      await vi.advanceTimersByTimeAsync(200);
+    }
+    expect(contextCard()).not.toBeNull();
+    dispose();
+  });
+
+  it("closes the card after the pointer leaves it and the grace expires", async () => {
+    vi.useFakeTimers();
+    document.body.innerHTML =
+      '<p><font data-imt="source">Hover source word.</font></p>';
+    const source = document.querySelector<HTMLElement>(
+      'font[data-imt="source"]',
+    )!;
+    stubPoint(source.firstChild as Text);
+    stubElementFromPoint(source);
+    const dispose = installDirectHoverTranslation(
+      vi.fn(() => new Promise<never>(() => undefined)),
+      { delayMs: 500 },
+    );
+
+    source.dispatchEvent(
+      new MouseEvent("mousemove", {
+        bubbles: true,
+        clientX: 20,
+        clientY: 30,
+      }),
+    );
+    await vi.advanceTimersByTimeAsync(500);
+    expect(contextCard()).not.toBeNull();
+
+    const card = cardElement()!;
+    card.dispatchEvent(
+      new MouseEvent("mousemove", {
+        bubbles: true,
+        composed: true,
+        clientX: 200,
+        clientY: 300,
+      }),
+    );
+    await vi.advanceTimersByTimeAsync(10);
+
+    stubEmptyPoint();
+    stubElementFromPoint(document.body);
+    document.body.dispatchEvent(
+      new MouseEvent("mousemove", { bubbles: true, clientX: 500, clientY: 600 }),
+    );
+    await vi.advanceTimersByTimeAsync(100);
+    expect(contextCard()).not.toBeNull();
+
+    await vi.advanceTimersByTimeAsync(100);
+    expect(contextCard()).toBeNull();
+    dispose();
+  });
+
+  it("re-entering during grace cancels the close", async () => {
+    vi.useFakeTimers();
+    document.body.innerHTML =
+      '<p><font data-imt="source">Hover source word.</font></p>';
+    const source = document.querySelector<HTMLElement>(
+      'font[data-imt="source"]',
+    )!;
+    stubPoint(source.firstChild as Text);
+    stubElementFromPoint(source);
+    const dispose = installDirectHoverTranslation(
+      vi.fn(() => new Promise<never>(() => undefined)),
+      { delayMs: 500 },
+    );
+
+    source.dispatchEvent(
+      new MouseEvent("mousemove", {
+        bubbles: true,
+        clientX: 20,
+        clientY: 30,
+      }),
+    );
+    await vi.advanceTimersByTimeAsync(500);
+    expect(contextCard()).not.toBeNull();
+
+    const card = cardElement()!;
+    card.dispatchEvent(
+      new MouseEvent("mousemove", {
+        bubbles: true,
+        composed: true,
+        clientX: 200,
+        clientY: 300,
+      }),
+    );
+    await vi.advanceTimersByTimeAsync(10);
+
+    stubEmptyPoint();
+    stubElementFromPoint(document.body);
+    document.body.dispatchEvent(
+      new MouseEvent("mousemove", { bubbles: true, clientX: 500, clientY: 600 }),
+    );
+    await vi.advanceTimersByTimeAsync(100);
+    expect(contextCard()).not.toBeNull();
+
+    cardElement()?.dispatchEvent(
+      new MouseEvent("mousemove", {
+        bubbles: true,
+        composed: true,
+        clientX: 200,
+        clientY: 300,
+      }),
+    );
+    await vi.advanceTimersByTimeAsync(300);
+    expect(contextCard()).not.toBeNull();
     dispose();
   });
 });

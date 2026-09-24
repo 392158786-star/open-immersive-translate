@@ -121,8 +121,8 @@ describe("renderTranslation", () => {
       '[data-imt="reading-toggle"]',
     )!;
 
-    expect(headingTarget.classList.contains("imt-research-hidden")).toBe(false);
-    expect(leadTarget.classList.contains("imt-research-hidden")).toBe(false);
+    expect(headingTarget.style.display).toBe("none");
+    expect(leadTarget.style.display).toBe("none");
     expect(bodyTarget.style.display).toBe("none");
     expect(toggle.hidden).toBe(false);
 
@@ -747,6 +747,33 @@ describe("renderTranslation", () => {
     expect(
       pairs[1]?.querySelector(".imt-pair-target-block")?.textContent,
     ).toBe("\u7b2c\u4e8c\u53e5\u62a5\u544a\u7ed3\u679c\u3002");
+  });
+
+  it("does not repeat a translation when the source has more sentences", () => {
+    const source =
+      "The first sentence explains the method clearly. The second sentence reports the measured result. The third sentence adds important context.";
+    document.body.innerHTML = `<p>${source}</p>`;
+    const container = document.querySelector("p")!;
+
+    renderTranslation(
+      makeParagraph(container),
+      translationFragment("第一句解释方法。第二句补充重要背景。"),
+      {
+        mode: "dual",
+        theme: "none",
+        wrapperTag: "font",
+        prefix: "smart",
+        translatedSegments: ["第一句解释方法。", "第二句补充重要背景。"],
+      },
+    );
+
+    const targetTexts = [
+      ...container.querySelectorAll(".imt-pair-target-block"),
+    ].map((element) => element.textContent?.trim());
+    expect(targetTexts.filter((text) => text === "第一句解释方法。")).toHaveLength(1);
+    expect(
+      targetTexts.filter((text) => text === "第二句补充重要背景。"),
+    ).toHaveLength(1);
   });
 
   it("keeps interactive elements visible while replacing their label text", () => {

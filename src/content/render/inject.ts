@@ -427,28 +427,6 @@ function applyMode(state: RenderState, mode: TranslationMode): void {
   }
 }
 
-function isHeadingContainer(container: Element): boolean {
-  return (
-    /^H[1-6]$/u.test(container.tagName) ||
-    container.getAttribute("role") === "heading" ||
-    container.closest("h1, h2, h3, h4, h5, h6") !== null
-  );
-}
-
-function isLeadContainer(container: Element): boolean {
-  const root = container.closest("article, main, [role='main']");
-  const scope = root ?? container.ownerDocument.body;
-  if (!scope) return false;
-  const paragraphs = Array.from(scope.querySelectorAll("p")).filter(
-    (candidate) => (candidate.textContent ?? "").trim().length > 0,
-  );
-  return paragraphs[0] === container;
-}
-
-function isAlwaysVisibleInResearch(container: Element): boolean {
-  return isHeadingContainer(container) || isLeadContainer(container);
-}
-
 function ensureReadingToggle(
   state: RenderState,
   target: HTMLElement,
@@ -481,8 +459,7 @@ function applyReadingMode(state: RenderState, mode: ReadingMode): void {
   if (!target) return;
 
   target.dataset.imtReading = mode;
-  const alwaysVisible =
-    mode === "research" && isAlwaysVisibleInResearch(state.paragraph.container);
+  const alwaysVisible = false;
   const visible =
     mode !== "research" || alwaysVisible || state.translationExpanded === true;
   target.classList.toggle("imt-research-translation", mode === "research");
@@ -1693,17 +1670,35 @@ export function buildReadablePairs(
       : splitSentenceText(normalizedTranslation);
   if (!sourceSentences.length || !targetSentences.length) return false;
 
-  const sentencePairs = sourceSentences.map((sourceSentence, index) => {
-    const start = Math.floor((index * targetSentences.length) / sourceSentences.length);
-    const end = Math.max(
-      start + 1,
-      Math.floor(((index + 1) * targetSentences.length) / sourceSentences.length),
-    );
-    return {
-      source: sourceSentence,
-      target: targetSentences.slice(start, end).join(" "),
-    };
-  });
+  const sentencePairs =
+    targetSentences.length < sourceSentences.length
+      ? targetSentences.map((targetSentence, index, targets) => {
+          const chunkSize = Math.ceil(
+            sourceSentences.length / targets.length,
+          );
+          return {
+            source: sourceSentences
+              .slice(index * chunkSize, (index + 1) * chunkSize)
+              .join(" "),
+            target: targetSentence,
+          };
+        })
+      : sourceSentences.map((sourceSentence, index) => {
+          const start = Math.floor(
+            (index * targetSentences.length) / sourceSentences.length,
+          );
+          const end = Math.max(
+            start + 1,
+            Math.floor(
+              ((index + 1) * targetSentences.length) /
+                sourceSentences.length,
+            ),
+          );
+          return {
+            source: sourceSentence,
+            target: targetSentences.slice(start, end).join(" "),
+          };
+        });
   const sourceGroups: string[] = [];
   const targetGroups: string[] = [];
   let sourceGroup = "";

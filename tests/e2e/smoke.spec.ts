@@ -503,6 +503,59 @@ test("translates newly visible paragraphs after scrolling a long page", async ({
   }
 });
 
+test("shows the local collection panel with saved articles and words", async ({
+  playwright,
+}) => {
+  const { context, worker, extensionId } = await launchExtension(playwright);
+  try {
+    await selectMockService(worker);
+    const page = await context.newPage();
+    await page.goto(
+      `chrome-extension://${extensionId}/src/ui/sidepanel/index.html`,
+    );
+    await page.evaluate(async () => {
+      const api = (
+        globalThis as unknown as {
+          chrome: {
+            runtime: {
+              sendMessage(message: unknown): Promise<unknown>;
+            };
+          };
+        }
+      ).chrome;
+      await api.runtime.sendMessage({
+        type: "learningSaveArticle",
+        url: "https://example.com/article",
+        title: "Saved Article",
+      });
+      await api.runtime.sendMessage({
+        type: "learningSaveWord",
+        url: "https://example.com/article",
+        title: "Saved Article",
+        domain: "Computer science",
+        word: "algorithm",
+        sentence: "An algorithm is a set of steps.",
+        previousSentence: "",
+        nextSentence: "",
+        paragraphTheme: "Introduction",
+        translation: "algorithm translation",
+        partOfSpeech: "noun",
+        definition: "A procedure for solving a problem.",
+      });
+    });
+
+    await page.getByRole("tab").nth(3).click();
+    await expect(page.locator(".learning-panel")).toBeVisible();
+    await expect(page.getByText("Saved Article")).toBeVisible();
+
+    await page.locator(".learning-segments button").nth(1).click();
+    await expect(page.getByText("algorithm", { exact: true })).toBeVisible();
+    await expect(page.getByText("noun", { exact: true })).toBeVisible();
+  } finally {
+    await context.close();
+  }
+});
+
 test("falls back to extension tabs in the domestic Chromium build", async ({
   playwright,
 }) => {

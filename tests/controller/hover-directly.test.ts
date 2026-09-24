@@ -97,6 +97,59 @@ describe("context hover translation", () => {
     dispose();
   });
 
+  it("selects original source text but excludes translated target text", async () => {
+    vi.useFakeTimers();
+    document.body.innerHTML =
+      '<p><font data-imt="source">Hover source paragraph words.</font></p>';
+    const source = document.querySelector<HTMLElement>(
+      'font[data-imt="source"]',
+    )!;
+    const sourceText = source.firstChild as Text;
+    stubPoint(sourceText);
+    stubElementFromPoint(source);
+    const sourceResolve = vi.fn().mockResolvedValue(knowledge);
+    const sourceDispose = installDirectHoverTranslation(sourceResolve, {
+      delayMs: 500,
+    });
+
+    source.dispatchEvent(
+      new MouseEvent("mousemove", {
+        bubbles: true,
+        clientX: 20,
+        clientY: 30,
+      }),
+    );
+    await vi.advanceTimersByTimeAsync(500);
+    expect(sourceResolve).toHaveBeenCalledWith(
+      expect.objectContaining({ word: "Hover" }),
+    );
+    sourceDispose();
+
+    document.body.innerHTML =
+      '<p><font data-imt="target">Translated target words.</font></p>';
+    const target = document.querySelector<HTMLElement>(
+      'font[data-imt="target"]',
+    )!;
+    const targetText = target.firstChild as Text;
+    stubPoint(targetText);
+    stubElementFromPoint(target);
+    const targetResolve = vi.fn().mockResolvedValue(knowledge);
+    const targetDispose = installDirectHoverTranslation(targetResolve, {
+      delayMs: 500,
+    });
+
+    target.dispatchEvent(
+      new MouseEvent("mousemove", {
+        bubbles: true,
+        clientX: 20,
+        clientY: 30,
+      }),
+    );
+    await vi.advanceTimersByTimeAsync(500);
+    expect(targetResolve).not.toHaveBeenCalled();
+    targetDispose();
+  });
+
   it("passes resolved knowledge to the bookmark callback and marks the word collected", async () => {
     vi.useFakeTimers();
     document.body.innerHTML = `

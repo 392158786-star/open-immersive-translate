@@ -42,9 +42,10 @@ interface WordAtPoint {
 }
 
 function isExcluded(target: Element): boolean {
+  if (target.closest('[data-imt="target"]')) return true;
   return (
     target.closest(
-      "a, button, input, textarea, select, option, pre, code, kbd, samp, [contenteditable='true'], [role='textbox'], [data-imt]",
+      "a, button, input, textarea, select, option, pre, code, kbd, samp, [contenteditable='true'], [role='textbox'], [data-imt]:not([data-imt='source'])",
     ) !== null
   );
 }

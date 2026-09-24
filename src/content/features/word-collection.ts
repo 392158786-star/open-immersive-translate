@@ -163,7 +163,7 @@ const TEMPLATE = `
   </aside>
 `;
 
-/** Current-page word collection drawer rendered inside a Shadow DOM. */
+/** Site-scoped word collection drawer rendered inside a Shadow DOM. */
 export class WordCollectionDrawer {
   private host?: HTMLElement;
   private shadow?: ShadowRoot;
@@ -486,7 +486,7 @@ function groupWords(words: SavedWord[]): WordGroup[] {
   return [...map.values()];
 }
 
-/** Mount the current-page word collection drawer with real dependencies. */
+/** Mount the site-scoped word collection drawer with real dependencies. */
 export function initWordCollection(): () => void {
   const drawer = new WordCollectionDrawer({
     currentHostname: async () => window.location.hostname,

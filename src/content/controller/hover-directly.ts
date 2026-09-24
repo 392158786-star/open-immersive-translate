@@ -257,9 +257,10 @@ function renderCard(
         padding: 10px 12px;
         cursor: pointer;
       }
-      header { display: flex; align-items: baseline; gap: 8px; }
+      header { display: flex; align-items: center; gap: 8px; }
       strong { font-size: 15px; }
       .translation { color: #175cd3; font-weight: 600; }
+      .bookmark-action { margin-left: auto; }
       .domain { margin-top: 2px; color: #667085; font-size: 11px; }
       .definition { margin-top: 7px; }
       .details { display: none; margin-top: 8px; }
@@ -286,6 +287,7 @@ function renderCard(
       <header>
         <strong>${escapeHtml(knowledge.term || request.word)}</strong>
         <span class="translation">${escapeHtml(pending ? "解析中…" : knowledge.translation || request.word)}</span>
+        <button class="bookmark-action" type="button" data-action="bookmark-word" data-state="uncollected" aria-label="收藏词语">${BOOKMARK_OUTLINE_ICON}<span>收藏词语</span></button>
       </header>
       <div class="domain">${escapeHtml(knowledge.domain || request.domain)}</div>
       <div class="definition">${escapeHtml(pending ? "正在结合上下文查询释义…" : knowledge.definition || request.sentence)}</div>
@@ -297,7 +299,6 @@ function renderCard(
             : ""
         }
         <div class="actions">
-          <button type="button" data-action="bookmark-word" data-state="uncollected" aria-label="收藏词语">${BOOKMARK_OUTLINE_ICON}<span>收藏词语</span></button>
           <button type="button" data-action="open-source">查看原文出处</button>
         </div>
       </div>

@@ -219,6 +219,7 @@ describe("context hover translation", () => {
       'button[data-action="bookmark-word"]',
     );
     expect(button).toBeTruthy();
+    expect(button?.closest(".details")).toBeNull();
     expect(button?.dataset.state).toBe("uncollected");
     expect(button?.getAttribute("aria-label")).toBe("收藏词语");
     expect(

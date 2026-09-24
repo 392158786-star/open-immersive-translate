@@ -4,10 +4,14 @@ import { sendToBackground } from "../../shared/messages";
 import type { FeatureContext } from "./context";
 
 export const FLOAT_BALL_POSITION_KEY = "floatBallPos";
+const FLOAT_BALL_SIZE = 36;
+const FLOAT_BALL_MARGIN = 8;
 
 interface FloatBallPosition {
   x: number;
   y: number;
+  xRatio?: number;
+  yRatio?: number;
 }
 
 function isPosition(value: unknown): value is FloatBallPosition {
@@ -16,10 +20,78 @@ function isPosition(value: unknown): value is FloatBallPosition {
   return Number.isFinite(candidate.x) && Number.isFinite(candidate.y);
 }
 
-function clampPosition(position: FloatBallPosition): FloatBallPosition {
+interface FloatBallViewport {
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+}
+
+function viewportBounds(): FloatBallViewport {
+  const viewport = window.visualViewport;
   return {
-    x: Math.max(0, Math.min(window.innerWidth - 36, position.x)),
-    y: Math.max(0, Math.min(window.innerHeight - 36, position.y)),
+    left: viewport?.offsetLeft ?? 0,
+    top: viewport?.offsetTop ?? 0,
+    width: viewport?.width ?? window.innerWidth,
+    height: viewport?.height ?? window.innerHeight,
+  };
+}
+
+function clampPosition(position: FloatBallPosition): FloatBallPosition {
+  const viewport = viewportBounds();
+  const maxX = Math.max(
+    viewport.left,
+    viewport.left + viewport.width - FLOAT_BALL_SIZE - FLOAT_BALL_MARGIN,
+  );
+  const maxY = Math.max(
+    viewport.top,
+    viewport.top + viewport.height - FLOAT_BALL_SIZE - FLOAT_BALL_MARGIN,
+  );
+  return {
+    x: Math.max(viewport.left + FLOAT_BALL_MARGIN, Math.min(maxX, position.x)),
+    y: Math.max(viewport.top + FLOAT_BALL_MARGIN, Math.min(maxY, position.y)),
+    ...(Number.isFinite(position.xRatio) ? { xRatio: position.xRatio } : {}),
+    ...(Number.isFinite(position.yRatio) ? { yRatio: position.yRatio } : {}),
+  };
+}
+
+function positionFromRatios(
+  xRatio: number,
+  yRatio: number,
+): FloatBallPosition {
+  const viewport = viewportBounds();
+  const travelX = Math.max(
+    0,
+    viewport.width - FLOAT_BALL_SIZE - FLOAT_BALL_MARGIN * 2,
+  );
+  const travelY = Math.max(
+    0,
+    viewport.height - FLOAT_BALL_SIZE - FLOAT_BALL_MARGIN * 2,
+  );
+  return clampPosition({
+    x: viewport.left + FLOAT_BALL_MARGIN + Math.min(1, Math.max(0, xRatio)) * travelX,
+    y: viewport.top + FLOAT_BALL_MARGIN + Math.min(1, Math.max(0, yRatio)) * travelY,
+    xRatio,
+    yRatio,
+  });
+}
+
+function ratiosFromPosition(position: FloatBallPosition): {
+  xRatio: number;
+  yRatio: number;
+} {
+  const viewport = viewportBounds();
+  const travelX = Math.max(
+    1,
+    viewport.width - FLOAT_BALL_SIZE - FLOAT_BALL_MARGIN * 2,
+  );
+  const travelY = Math.max(
+    1,
+    viewport.height - FLOAT_BALL_SIZE - FLOAT_BALL_MARGIN * 2,
+  );
+  return {
+    xRatio: Math.min(1, Math.max(0, (position.x - viewport.left - FLOAT_BALL_MARGIN) / travelX)),
+    yRatio: Math.min(1, Math.max(0, (position.y - viewport.top - FLOAT_BALL_MARGIN) / travelY)),
   };
 }
 
@@ -124,14 +196,34 @@ export function init(ctx: FeatureContext): () => void {
       }
     | undefined;
   let suppressClick = false;
+  let currentRatio = {
+    xRatio: ctx.config.floatBall.position === "left" ? 0 : 1,
+    yRatio: 0.5,
+  };
 
-  const setPosition = (position: FloatBallPosition): void => {
+  const setPosition = (position: FloatBallPosition): FloatBallPosition => {
     const clamped = clampPosition(position);
-    host.style.left = `${clamped.x}px`;
-    host.style.top = `${clamped.y}px`;
+    const ratio =
+      Number.isFinite(position.xRatio) && Number.isFinite(position.yRatio)
+        ? {
+            xRatio: position.xRatio as number,
+            yRatio: position.yRatio as number,
+          }
+        : ratiosFromPosition(clamped);
+    currentRatio = ratio;
+    const resolved = positionFromRatios(ratio.xRatio, ratio.yRatio);
+    host.style.left = `${resolved.x}px`;
+    host.style.top = `${resolved.y}px`;
     host.style.right = "auto";
     host.style.transform = "none";
-    host.dataset.side = clamped.x < window.innerWidth / 2 ? "left" : "right";
+    const viewport = viewportBounds();
+    host.dataset.side =
+      resolved.x < viewport.left + viewport.width / 2 ? "left" : "right";
+    return resolved;
+  };
+
+  const onViewportChange = (): void => {
+    setPosition(positionFromRatios(currentRatio.xRatio, currentRatio.yRatio));
   };
 
   void browser.storage.local
@@ -139,10 +231,19 @@ export function init(ctx: FeatureContext): () => void {
     .then((stored) => {
       const position = stored[FLOAT_BALL_POSITION_KEY];
       if (!disposed && !positionTouched && isPosition(position)) {
-        setPosition(position);
+        setPosition(
+          Number.isFinite(position.xRatio) && Number.isFinite(position.yRatio)
+            ? positionFromRatios(
+                position.xRatio as number,
+                position.yRatio as number,
+              )
+            : position,
+        );
       }
     })
     .catch(() => undefined);
+
+  setPosition(positionFromRatios(currentRatio.xRatio, currentRatio.yRatio));
 
   const closeMenu = (): void => {
     menu.hidden = true;
@@ -194,8 +295,7 @@ export function init(ctx: FeatureContext): () => void {
     suppressClick = true;
     const left = completedDrag.left + event.clientX - completedDrag.startX;
     const top = completedDrag.top + event.clientY - completedDrag.startY;
-    const position = clampPosition({ x: left, y: top });
-    setPosition(position);
+    const position = setPosition({ x: left, y: top });
     void browser.storage.local
       .set({ [FLOAT_BALL_POSITION_KEY]: position })
       .catch(() => undefined);
@@ -292,6 +392,10 @@ export function init(ctx: FeatureContext): () => void {
   menu.addEventListener("click", onMenuClick);
   window.addEventListener("pointermove", onPointerMove);
   window.addEventListener("pointerup", onPointerUp);
+  window.addEventListener("resize", onViewportChange);
+  window.visualViewport?.addEventListener("resize", onViewportChange);
+  window.visualViewport?.addEventListener("scroll", onViewportChange);
+  document.addEventListener("fullscreenchange", onViewportChange);
   document.addEventListener("pointerdown", onDocumentPointerDown);
   document.addEventListener("keydown", onKeyDown);
   refreshMenuState();
@@ -304,6 +408,10 @@ export function init(ctx: FeatureContext): () => void {
     menu.removeEventListener("click", onMenuClick);
     window.removeEventListener("pointermove", onPointerMove);
     window.removeEventListener("pointerup", onPointerUp);
+    window.removeEventListener("resize", onViewportChange);
+    window.visualViewport?.removeEventListener("resize", onViewportChange);
+    window.visualViewport?.removeEventListener("scroll", onViewportChange);
+    document.removeEventListener("fullscreenchange", onViewportChange);
     document.removeEventListener("pointerdown", onDocumentPointerDown);
     document.removeEventListener("keydown", onKeyDown);
     host.remove();

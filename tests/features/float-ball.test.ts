@@ -79,10 +79,55 @@ describe("float ball", () => {
     window.dispatchEvent(pointerEvent("pointerup", 160, 260));
 
     expect(browserMock.storage.local.set).toHaveBeenCalledWith({
-      [FLOAT_BALL_POSITION_KEY]: { x: 150, y: 250 },
+      [FLOAT_BALL_POSITION_KEY]: expect.objectContaining({
+        x: 150,
+        y: 250,
+      }),
     });
     expect(host.style.left).toBe("150px");
     expect(host.style.top).toBe("250px");
+    dispose();
+  });
+
+  it("keeps the ball inside a smaller viewport", async () => {
+    Object.defineProperty(window, "innerWidth", {
+      configurable: true,
+      value: 600,
+    });
+    Object.defineProperty(window, "innerHeight", {
+      configurable: true,
+      value: 400,
+    });
+    browserMock.storage.local.get.mockResolvedValueOnce({
+      [FLOAT_BALL_POSITION_KEY]: {
+        x: 0,
+        y: 0,
+        xRatio: 1,
+        yRatio: 1,
+      },
+    });
+    const dispose = init(context());
+    await Promise.resolve();
+    await Promise.resolve();
+    const host = document.querySelector<HTMLElement>(
+      '[data-imt="float-ball"]',
+    )!;
+
+    expect(host.style.left).toBe("556px");
+    expect(host.style.top).toBe("356px");
+
+    Object.defineProperty(window, "innerWidth", {
+      configurable: true,
+      value: 320,
+    });
+    Object.defineProperty(window, "innerHeight", {
+      configurable: true,
+      value: 320,
+    });
+    window.dispatchEvent(new Event("resize"));
+
+    expect(host.style.left).toBe("276px");
+    expect(host.style.top).toBe("276px");
     dispose();
   });
 });

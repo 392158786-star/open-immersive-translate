@@ -68,6 +68,12 @@ test("快速、专业和研究模式正确切换展示与原文 DOM", async ({ p
   await page.locator(".mode-row").getByRole("button", { name: "研究" }).click();
   const hiddenBefore = await page.locator(".imt-research-hidden").count();
   expect(hiddenBefore).toBeGreaterThan(0);
+  expect(
+    await page
+      .locator(".imt-research-hidden")
+      .first()
+      .evaluate((element) => getComputedStyle(element).display),
+  ).toBe("none");
   const toggle = page.locator('[data-imt="reading-toggle"]').first();
   await expect(toggle).toBeVisible();
   await toggle.click();

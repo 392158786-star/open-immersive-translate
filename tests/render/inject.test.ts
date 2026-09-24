@@ -123,11 +123,11 @@ describe("renderTranslation", () => {
 
     expect(headingTarget.classList.contains("imt-research-hidden")).toBe(false);
     expect(leadTarget.classList.contains("imt-research-hidden")).toBe(false);
-    expect(bodyTarget.classList.contains("imt-research-hidden")).toBe(true);
+    expect(bodyTarget.style.display).toBe("none");
     expect(toggle.hidden).toBe(false);
 
     toggle.click();
-    expect(bodyTarget.classList.contains("imt-research-hidden")).toBe(false);
+    expect(bodyTarget.style.display).not.toBe("none");
   });
 
   it("shrinks constrained source text without shrinking the target", () => {

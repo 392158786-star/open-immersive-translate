@@ -93,6 +93,8 @@ interface RenderState {
   readingToggle?: HTMLButtonElement;
   readingMode?: ReadingMode;
   translationExpanded?: boolean;
+  researchDisplay?: string;
+  researchDisplayPriority?: string;
   paired?: boolean;
 }
 
@@ -485,6 +487,26 @@ function applyReadingMode(state: RenderState, mode: ReadingMode): void {
     mode !== "research" || alwaysVisible || state.translationExpanded === true;
   target.classList.toggle("imt-research-translation", mode === "research");
   target.classList.toggle("imt-research-hidden", !visible);
+  if (mode === "research" && !visible) {
+    if (state.researchDisplay === undefined) {
+      state.researchDisplay = target.style.getPropertyValue("display");
+      state.researchDisplayPriority =
+        target.style.getPropertyPriority("display");
+    }
+    target.style.setProperty("display", "none", "important");
+  } else if (state.researchDisplay !== undefined) {
+    if (state.researchDisplay) {
+      target.style.setProperty(
+        "display",
+        state.researchDisplay,
+        state.researchDisplayPriority,
+      );
+    } else {
+      target.style.removeProperty("display");
+    }
+    state.researchDisplay = undefined;
+    state.researchDisplayPriority = undefined;
+  }
 
   const toggle =
     mode === "research" && !alwaysVisible

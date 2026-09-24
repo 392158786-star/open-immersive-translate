@@ -248,11 +248,11 @@ describe("translatePage", () => {
     )!;
 
     expect(paragraphTarget.dataset.imtReading).toBe("research");
-    expect(paragraphTarget.classList.contains("imt-research-hidden")).toBe(true);
+    expect(paragraphTarget.style.display).toBe("none");
     expect(toggle).not.toBeNull();
 
     toggle.click();
-    expect(paragraphTarget.classList.contains("imt-research-hidden")).toBe(false);
+    expect(paragraphTarget.style.display).not.toBe("none");
   });
 
   it("detects academic terms in paragraphs", async () => {

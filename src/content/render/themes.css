@@ -52,16 +52,6 @@
   display: none !important;
 }
 
-[data-imt-quick-pending="true"] {
-  color: transparent !important;
-}
-
-[data-imt-quick-pending="true"]::before {
-  display: block !important;
-  color: #175cd3 !important;
-  content: "翻译中…";
-}
-
 .imt-academic-term {
   border-bottom: 1px dotted currentColor !important;
   cursor: help !important;

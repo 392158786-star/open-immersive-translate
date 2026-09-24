@@ -785,13 +785,6 @@ describe("TranslationController", () => {
 
     expect(document.documentElement.dataset.imtTranslationBusy).toBe("false");
     expect(document.querySelector("p")?.textContent).toBe(source);
-    expect(
-      document.querySelector("p")?.classList.contains("imt-source-hidden"),
-    ).toBe(true);
-    controller.setMode("dual");
-    expect(
-      document.querySelector("p")?.classList.contains("imt-source-hidden"),
-    ).toBe(false);
     controller.destroy();
   });
 

@@ -130,20 +130,6 @@ describe("renderTranslation", () => {
     expect(bodyTarget.style.display).not.toBe("none");
   });
 
-  it("hides the source immediately while quick mode is loading", () => {
-    document.body.innerHTML = "<p>English source must disappear</p>";
-    const paragraph = document.querySelector("p")!;
-
-    setLoading(makeParagraph(paragraph), "quick");
-
-    expect(
-      paragraph.querySelector('[data-imt="source"]')?.classList.contains(
-        "imt-source-hidden",
-      ),
-    ).toBe(true);
-    expect(paragraph.querySelector('[data-imt="loading"]')).not.toBeNull();
-  });
-
   it("shrinks constrained source text without shrinking the target", () => {
     document.body.innerHTML =
       '<div class="card"><h4><a href="/story">A constrained English source headline.</a></h4></div>';

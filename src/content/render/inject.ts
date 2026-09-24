@@ -1843,18 +1843,12 @@ export function renderTranslation(
 }
 
 /** Replace the current result with a loading indicator. */
-export function setLoading(
-  paragraph: Paragraph,
-  readingMode: ReadingMode = "professional",
-): void {
+export function setLoading(paragraph: Paragraph): void {
   const state = newState(paragraph);
   const target = createTarget(paragraph, "loading");
-  state.target = target;
   target.classList.add("imt-loading");
-  target.textContent = "翻译中";
   target.setAttribute("aria-label", "Translating");
   appendTarget(paragraph, target, "smart", state);
-  applyReadingMode(state, readingMode);
 }
 
 /** Replace the current result with an error message and retry button. */

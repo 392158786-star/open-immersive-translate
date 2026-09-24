@@ -1118,9 +1118,6 @@ export class TranslationController implements PageControllerActions {
   ): Promise<void> {
     const requestParagraphs: TranslatePortMessage["paragraphs"] = [];
     for (const paragraph of paragraphs) {
-      if (this.currentReadingMode() === "quick") {
-        paragraph.container.setAttribute("data-imt-quick-pending", "true");
-      }
       this.pendingIds.add(paragraph.id);
       this.errorIds.delete(paragraph.id);
       paragraph.translatedSegments = undefined;
@@ -1270,7 +1267,6 @@ export class TranslationController implements PageControllerActions {
     const paragraph = this.paragraphs.get(paragraphId);
     if (!paragraph || this.renderedIds.has(paragraphId)) return;
     removeTranslation(paragraph);
-    this.hideFailedSource(paragraph);
     this.pendingIds.delete(paragraphId);
     this.errorIds.delete(paragraphId);
     markTranslated(paragraph.container, paragraphId);
@@ -1323,9 +1319,6 @@ export class TranslationController implements PageControllerActions {
     priority: TranslationPriority,
   ): Promise<void> {
     const generation = this.generation;
-    if (this.currentReadingMode() === "quick") {
-      paragraph.container.setAttribute("data-imt-quick-pending", "true");
-    }
     this.pendingIds.add(paragraph.id);
     this.errorIds.delete(paragraph.id);
     this.emitState();
@@ -1590,7 +1583,6 @@ export class TranslationController implements PageControllerActions {
     if (result.error) {
       if (this.shouldSkipFailedTranslation(paragraph)) {
         removeTranslation(paragraph);
-        this.hideFailedSource(paragraph);
         this.pendingIds.delete(paragraph.id);
         this.errorIds.delete(paragraph.id);
         markTranslated(paragraph.container, paragraph.id);
@@ -1759,7 +1751,6 @@ export class TranslationController implements PageControllerActions {
         ? decodePlaceholders(text, paragraph.placeholders, PLACEHOLDER_STYLE)
         : document.createDocumentFragment();
       if (!decode) fragment.append(text);
-      paragraph.container.removeAttribute("data-imt-quick-pending");
       this.hiddenSources.delete(paragraph.container);
       paragraph.container.classList.remove("imt-source-hidden");
       const target = renderTranslation(paragraph as Paragraph, fragment, {

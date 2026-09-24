@@ -107,7 +107,7 @@ describe("SidePanel", () => {
       type: "getSelectionText",
     });
 
-    fireEvent.click(screen.getByRole("tab", { name: "页面" }));
+    fireEvent.click(screen.getByRole("tab", { name: "本页" }));
     expect(await screen.findByRole("button", { name: "收藏" })).toBeTruthy();
   });
 });

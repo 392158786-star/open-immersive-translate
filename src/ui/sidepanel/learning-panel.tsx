@@ -317,7 +317,9 @@ export function LearningPanel({
                   articleTitle={article?.title ?? ""}
                   hostname={article ? hostnameOf(article.url) : ""}
                   inDictionary={dictionaryWords.has(normalize(word.word))}
-                  onOpenContext={() => openUrl(article?.url ?? "")}
+                  onOpenContext={() =>
+                    openUrl(word.sourceUrl ?? article?.url ?? "")
+                  }
                   onAddDictionary={() => void addDictionary(word)}
                   onUncollect={() => void uncollectWord(word.id)}
                 />

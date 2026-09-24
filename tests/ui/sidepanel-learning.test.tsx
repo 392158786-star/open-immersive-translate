@@ -184,7 +184,7 @@ describe("SidePanel collection", () => {
     await renderPanel();
     expect(await screen.findByRole("tab", { name: "翻译" })).toBeTruthy();
     expect(screen.getByRole("tab", { name: "对话" })).toBeTruthy();
-    expect(screen.getByRole("tab", { name: "页面" })).toBeTruthy();
+    expect(screen.getByRole("tab", { name: "本页" })).toBeTruthy();
     expect(screen.getByRole("tab", { name: "收藏" })).toBeTruthy();
 
     fireEvent.click(screen.getByRole("tab", { name: "收藏" }));
@@ -193,7 +193,7 @@ describe("SidePanel collection", () => {
 
   it("reflects collected and uncollected state on the current-page article card", async () => {
     await renderPanel();
-    fireEvent.click(screen.getByRole("tab", { name: "页面" }));
+    fireEvent.click(screen.getByRole("tab", { name: "本页" }));
     expect(await screen.findByRole("button", { name: "收藏" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "暂无截图" })).toBeTruthy();
   });
@@ -201,7 +201,7 @@ describe("SidePanel collection", () => {
   it("shows the current-page article card as collected when saved", async () => {
     learning.articles = [article()];
     await renderPanel();
-    fireEvent.click(screen.getByRole("tab", { name: "页面" }));
+    fireEvent.click(screen.getByRole("tab", { name: "本页" }));
     expect(
       await screen.findByRole("button", { name: "取消收藏" }),
     ).toBeTruthy();
@@ -285,7 +285,7 @@ describe("SidePanel collection", () => {
 
   it("sends a save message from the current-page card", async () => {
     await renderPanel();
-    fireEvent.click(screen.getByRole("tab", { name: "页面" }));
+    fireEvent.click(screen.getByRole("tab", { name: "本页" }));
     fireEvent.click(await screen.findByRole("button", { name: "收藏" }));
     await waitFor(() =>
       expect(browserMock.runtime.sendMessage).toHaveBeenCalledWith(
@@ -307,6 +307,29 @@ describe("SidePanel collection", () => {
       expect(browserMock.runtime.sendMessage).toHaveBeenCalledWith(
         expect.objectContaining({ type: "learningRemoveArticle" }),
       ),
+    );
+  });
+
+  it("opens the saved word source URL when available", async () => {
+    learning.articles = [article()];
+    learning.words = [
+      word({ sourceUrl: "https://doi.org/10.1234/example" }),
+    ];
+    learning.websites = [website()];
+    await renderPanel();
+    await openCollection();
+    fireEvent.click(screen.getAllByRole("tab")[5]);
+
+    const card = (await screen.findByText("algorithm")).closest(
+      ".learning-card",
+    );
+    const openButton = card?.querySelector("button");
+    expect(openButton).toBeTruthy();
+    fireEvent.click(openButton as HTMLButtonElement);
+    await waitFor(() =>
+      expect(browserMock.tabs.create).toHaveBeenCalledWith({
+        url: "https://doi.org/10.1234/example",
+      }),
     );
   });
 
